@@ -4,7 +4,7 @@
 
 Linux users coming from macOS lose their muscle memory the moment they switch desktops: Ctrl vs Cmd, different shortcut combinations in every app, and Option-key special characters that just don't exist. [Toshy](https://github.com/RedBearAK/toshy) solves this on Linux today, but it's a Python application built on top of `xwaykeyz`/`keyszer` — a stack that ships a Python virtualenv, runs an installer script that touches the system in many places, and is comparatively heavy to package and distribute cleanly.
 
-**mackey** is a Rust rewrite of Toshy with a deliberately narrow MVP: ship a single statically-linked daemon plus a small GTK4 configuration app, distributed as `.rpm` and `.deb` packages whose post-install does as little as possible. On first launch the GUI walks the user through the one-time system setup (systemd user service, udev rule, GNOME Shell extension) and then gets out of the way.
+**mackey** is a Rust rewrite of Toshy with a deliberately narrow MVP: ship a single statically-linked daemon plus a small GTK4 configuration app, distributed as `.rpm` and `.deb` packages whose post-install does as little as possible. On first launch the GUI walks the user through the one-time system setup (enabling the systemd system service, installing the GNOME Shell extension) and then gets out of the way.
 
 The goal is *not* feature parity with Toshy on day one. The goal is a clean foundation that nails the most common case — a MacBook-layout keyboard on Fedora or Ubuntu running GNOME on Wayland — and is easy to extend.
 
