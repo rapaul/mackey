@@ -104,7 +104,7 @@ match_app_id = "firefox.desktop"
 "Super+T" = "Ctrl+T"
 "Super+W" = "Ctrl+W"
 ```
-Default config ships with bindings for: Files (Nautilus), Firefox, GNOME Terminal, VS Code, and a global fallback.
+Default config ships with bindings for: Files (Nautilus), Firefox, Ghostty, and a global fallback.
 
 ### GUI (`mackey`)
 - GTK4 via `gtk4-rs`. Single foreground window; exits when the user closes it. No tray, no background process.
