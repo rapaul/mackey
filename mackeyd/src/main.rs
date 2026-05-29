@@ -1,9 +1,9 @@
 //! The mackey daemon.
 //!
-//! M5 — the first real walking skeleton. mackeyd creates one virtual output
-//! keyboard, grabs every physical keyboard exclusively (existing ones at
-//! startup, new ones via inotify), and forwards their events to the virtual
-//! keyboard unmodified. No keymap engine yet; that arrives in M6.
+//! M6 — the global keymap. mackeyd grabs every physical keyboard (existing ones
+//! at startup, new ones via inotify) and forwards their events to a single
+//! virtual output keyboard, running each key event through the built-in global
+//! keymap engine (Super+{C,V,X,…} -> Ctrl+…). No focus tracking yet.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -11,17 +11,22 @@ use std::thread;
 use std::time::Duration;
 
 use evdev::uinput::VirtualDevice;
-use evdev::{AttributeSet, Device, InputEvent, KeyCode};
+use evdev::{AttributeSet, Device, EventType, InputEvent, KeyCode};
 use inotify::{Inotify, WatchMask};
-use mackey_core::{is_keyboard, VIRTUAL_KEYBOARD_NAME};
+use mackey_core::{is_keyboard, KeymapEngine, VIRTUAL_KEYBOARD_NAME};
 
 const INPUT_DIR: &str = "/dev/input";
 
-/// Shared handle to the single virtual output keyboard.
-type Output = Arc<Mutex<VirtualDevice>>;
+/// Shared handles the reader threads forward through: the keymap engine (global
+/// modifier state) and the single virtual output keyboard.
+#[derive(Clone)]
+struct Forwarder {
+    engine: Arc<Mutex<KeymapEngine>>,
+    out: Arc<Mutex<VirtualDevice>>,
+}
 
 /// Build the virtual output keyboard, advertising the full key range so any
-/// forwarded key is accepted by the kernel.
+/// emitted key (including the synthetic Ctrl) is accepted by the kernel.
 fn build_virtual_keyboard() -> std::io::Result<VirtualDevice> {
     let mut keys = AttributeSet::<KeyCode>::new();
     for code in 1u16..0x300 {
@@ -33,7 +38,23 @@ fn build_virtual_keyboard() -> std::io::Result<VirtualDevice> {
         .build()
 }
 
-/// A keyboard we should grab — i.e. a real keyboard and not our own output.
+/// Run a batch of input events through the keymap engine, translating EV_KEY
+/// events and passing everything else (SYN, MSC, …) through unchanged.
+fn translate(engine: &mut KeymapEngine, batch: &[InputEvent]) -> Vec<InputEvent> {
+    let mut out = Vec::with_capacity(batch.len());
+    for ev in batch {
+        if ev.event_type() == EventType::KEY {
+            for k in engine.process(ev.code(), ev.value()) {
+                out.push(InputEvent::new(EventType::KEY.0, k.code, k.value));
+            }
+        } else {
+            out.push(*ev);
+        }
+    }
+    out
+}
+
+/// A keyboard we should grab — a real keyboard and not our own output.
 fn is_grabbable(dev: &Device) -> bool {
     if dev.name() == Some(VIRTUAL_KEYBOARD_NAME) {
         return false;
@@ -41,52 +62,55 @@ fn is_grabbable(dev: &Device) -> bool {
     dev.supported_keys().map(is_keyboard).unwrap_or(false)
 }
 
-/// Grab one device and spawn a thread forwarding its events to the output.
-fn grab_and_forward(path: PathBuf, mut dev: Device, out: Output) {
+/// Grab one device and spawn a thread forwarding its events through the engine.
+fn grab_and_forward(path: PathBuf, mut dev: Device, fwd: Forwarder) {
     if dev.grab().is_err() {
         return;
     }
     thread::spawn(move || {
         eprintln!("grabbed {}", path.display());
         loop {
-            let events: Vec<InputEvent> = match dev.fetch_events() {
+            let batch: Vec<InputEvent> = match dev.fetch_events() {
                 Ok(evts) => evts.collect(),
                 Err(e) => {
-                    // ENODEV on unplug, or any read error: drop the device,
-                    // which ungrabs it as the fd closes.
+                    // ENODEV on unplug, or any read error: dropping the device
+                    // closes the fd, which ungrabs it.
                     eprintln!("released {} ({e})", path.display());
                     return;
                 }
             };
-            if let Ok(mut out) = out.lock() {
-                let _ = out.emit(&events);
+            let translated = match fwd.engine.lock() {
+                Ok(mut engine) => translate(&mut engine, &batch),
+                Err(_) => continue,
+            };
+            if let Ok(mut out) = fwd.out.lock() {
+                let _ = out.emit(&translated);
             }
         }
     });
 }
 
 /// Grab every keyboard already present at startup.
-fn grab_existing(out: &Output) {
+fn grab_existing(fwd: &Forwarder) {
     for (path, dev) in evdev::enumerate() {
         if is_grabbable(&dev) {
-            grab_and_forward(path, dev, Arc::clone(out));
+            grab_and_forward(path, dev, fwd.clone());
         }
     }
 }
 
 /// Open + grab a freshly-appeared node, retrying briefly so udev has time to
 /// apply the mackey-group ACL before we (running as mackey) open it.
-fn grab_new_node(path: &Path, out: &Output) {
+fn grab_new_node(path: &Path, fwd: &Forwarder) {
     for attempt in 0..10 {
         thread::sleep(Duration::from_millis(100));
         match Device::open(path) {
             Ok(dev) => {
                 if is_grabbable(&dev) {
-                    grab_and_forward(path.to_path_buf(), dev, Arc::clone(out));
+                    grab_and_forward(path.to_path_buf(), dev, fwd.clone());
                 }
                 return;
             }
-            // Permissions not applied yet: keep retrying for ~1s.
             Err(_) if attempt < 9 => continue,
             Err(_) => return,
         }
@@ -94,7 +118,7 @@ fn grab_new_node(path: &Path, out: &Output) {
 }
 
 /// Watch /dev/input for new keyboards and grab them as they appear.
-fn hotplug_loop(out: Output) {
+fn hotplug_loop(fwd: Forwarder) {
     let mut inotify = match Inotify::init() {
         Ok(i) => i,
         Err(e) => {
@@ -119,7 +143,7 @@ fn hotplug_loop(out: Output) {
             let Some(name) = event.name else { continue };
             let name = name.to_string_lossy();
             if name.starts_with("event") {
-                grab_new_node(&PathBuf::from(INPUT_DIR).join(&*name), &out);
+                grab_new_node(&PathBuf::from(INPUT_DIR).join(&*name), &fwd);
             }
         }
     }
@@ -128,7 +152,7 @@ fn hotplug_loop(out: Output) {
 fn main() {
     eprintln!("mackeyd v{} starting", mackey_core::VERSION);
 
-    let out: Output = match build_virtual_keyboard() {
+    let out = match build_virtual_keyboard() {
         Ok(dev) => {
             eprintln!("created virtual keyboard \"{VIRTUAL_KEYBOARD_NAME}\"");
             Arc::new(Mutex::new(dev))
@@ -138,11 +162,15 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let fwd = Forwarder {
+        engine: Arc::new(Mutex::new(KeymapEngine::new())),
+        out,
+    };
 
-    grab_existing(&out);
+    grab_existing(&fwd);
 
-    let hotplug_out = Arc::clone(&out);
-    thread::spawn(move || hotplug_loop(hotplug_out));
+    let hotplug_fwd = fwd.clone();
+    thread::spawn(move || hotplug_loop(hotplug_fwd));
 
     // Block until asked to stop. Process exit closes every grabbed fd, which
     // ungrabs the physical keyboards — so input is never left frozen.
