@@ -15,4 +15,11 @@ Filters = [
     ".*: E: no-changelogname-tag",
     # The RPM Group tag is deprecated on modern Fedora; rpmlint's check is legacy.
     ".*: E: no-group-tag",
+    # "macOS" is a proper noun; the summary is intentionally lower-cased there.
+    ".*: W: summary-not-capitalized.*",
+    # GPL-3.0-or-later is valid SPDX; rpmlint 2.9's bundled license list is stale.
+    ".*: W: invalid-license.*",
+    # The MVP ships no man pages; the GUI wizard is the documentation surface.
+    ".*: W: no-manual-page-for-binary.*",
+    ".*: W: no-documentation",
 ]

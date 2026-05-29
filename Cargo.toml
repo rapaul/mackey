@@ -12,3 +12,8 @@ rust-version = "1.96"
 
 [workspace.dependencies]
 mackey-core = { path = "mackey-core", version = "0.0.0" }
+
+# Strip release binaries so the packaged mackeyd/mackey carry no debug symbols
+# (M11 promotes the unstripped-binary linter warning to an error).
+[profile.release]
+strip = true

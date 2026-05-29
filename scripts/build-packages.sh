@@ -79,7 +79,13 @@ rpm -qpl "$rpm"
 
 if command -v rpmlint >/dev/null; then
     echo "== rpmlint =="
-    rpmlint -c packaging/rpmlint.toml "$rpm"
+    # M11: warnings are errors now. Any non-filtered warning/error fails the build.
+    rpmlint_out="$(rpmlint -c packaging/rpmlint.toml "$rpm")"
+    echo "$rpmlint_out"
+    if ! echo "$rpmlint_out" | grep -qE '\b0 errors, 0 warnings\b'; then
+        echo "!! rpmlint reported warnings or errors (M11: these fail the build)" >&2
+        exit 1
+    fi
 else
     echo "!! rpmlint not found; skipping (runs in the Fedora VM)"
 fi
