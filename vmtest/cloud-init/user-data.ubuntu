@@ -1,0 +1,25 @@
+#cloud-config
+# Ubuntu 24.04 provisioning for the mackey vmtest harness.
+# A normal sudo-capable desktop user `tester` (mirrors a real GNOME user); the
+# cross-cutting invariant checks that installing mackey never changes its groups.
+hostname: mackey-ubuntu
+users:
+  - name: tester
+    groups: [sudo]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: tester
+    ssh_authorized_keys:
+      - __SSH_PUBKEY__
+ssh_pwauth: true
+package_update: true
+packages:
+  - gnome-shell
+  - gdm3
+  - gnome-session
+  - nautilus
+runcmd:
+  - [ bash, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=tester\nWaylandEnable=true\n' > /etc/gdm3/custom.conf" ]
+  - [ systemctl, set-default, graphical.target ]
+  - [ systemctl, enable, gdm3 ]
