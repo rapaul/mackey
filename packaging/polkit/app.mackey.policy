@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>mackey</vendor>
+  <vendor_url>https://github.com/richardapaul/mackey</vendor_url>
+
+  <!-- Pause/Resume the daemon. Authorized for the active local-seat user with
+       no prompt; anyone inactive or remote must authenticate as an admin. The
+       grant is scoped to the helper at exec.path, which only ever runs
+       `systemctl start|stop mackey.service`. -->
+  <action id="app.mackey.service-control">
+    <description>Pause or resume the mackey keyboard remapper</description>
+    <message>Authentication is required to pause or resume mackey</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/mackey-service-control</annotate>
+    <annotate key="org.freedesktop.policykit.exec.allow_gui">true</annotate>
+  </action>
+</policyconfig>

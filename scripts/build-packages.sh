@@ -28,6 +28,23 @@ else
     echo "!! eslint not found; skipping (run 'npm i -g eslint' to enable)"
 fi
 
+echo "== polkit policy =="
+policy=packaging/polkit/app.mackey.policy
+dtd=/usr/share/polkit-1/policyconfig-1.dtd
+if command -v xmllint >/dev/null; then
+    if [ -f "$dtd" ]; then
+        # --nonet so the DOCTYPE's external DTD URL is not fetched; validation
+        # uses the locally-installed polkit DTD instead.
+        xmllint --noout --nonet --dtdvalid "$dtd" "$policy"
+        echo "  -> valid against $dtd"
+    else
+        xmllint --noout "$policy"
+        echo "  -> well-formed (polkit DTD not installed; DTD validation skipped)"
+    fi
+else
+    echo "!! xmllint not found; skipping polkit validation"
+fi
+
 echo "== cargo deb =="
 deb="$(cargo deb -p mackeyd | tail -1)"
 echo "  -> $deb"

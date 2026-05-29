@@ -1,0 +1,17 @@
+#!/bin/sh
+# Privileged helper for the mackey GUI's Pause/Resume toggle.
+#
+# Invoked via pkexec, authorized by the app.mackey.service-control polkit action
+# (active local-seat user only). It deliberately accepts exactly two verbs and
+# hardcodes the unit, so the granted privilege is precisely "start or stop
+# mackey.service" and nothing else — arbitrary systemctl still needs sudo.
+set -eu
+
+case "${1:-}" in
+    start) exec systemctl start mackey.service ;;
+    stop)  exec systemctl stop mackey.service ;;
+    *)
+        echo "usage: mackey-service-control {start|stop}" >&2
+        exit 2
+        ;;
+esac
