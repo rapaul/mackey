@@ -119,10 +119,37 @@ boot_qemu() { # $1=disk  $2=optional seed.iso
         -drive file="$disk",if=virtio,format=qcow2 \
         "${seedarg[@]}" \
         -vga virtio -display none \
+        -device qemu-xhci,id=xhci \
         -netdev user,id=net0,hostfwd=tcp:127.0.0.1:"$D_PORT"-:22 \
         -device virtio-net-pci,netdev=net0 \
+        -qmp "unix:$RUN/qmp.sock,server=on,wait=off" \
         -serial file:"$RUN/serial.log" \
         -pidfile "$RUN/qemu.pid" -daemonize
+}
+
+# Send one QMP command (JSON) to the running VM and print the JSON reply.
+# Handles the capabilities handshake and skips async events.
+qmp_send() {
+    [ -S "$RUN/qmp.sock" ] || die "qmp socket missing (is $D_NAME up?)"
+    python3 - "$RUN/qmp.sock" "$1" <<'PY'
+import json, socket, sys
+sock_path, cmd = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX); s.connect(sock_path)
+f = s.makefile("rw")
+f.readline()  # QMP greeting
+def rpc(obj):
+    f.write(json.dumps(obj) + "\n"); f.flush()
+    while True:
+        line = f.readline()
+        if not line:
+            return None
+        msg = json.loads(line)
+        if "event" in msg:   # async event, not our reply
+            continue
+        return msg
+rpc({"execute": "qmp_capabilities"})
+print(json.dumps(rpc(json.loads(cmd))))
+PY
 }
 
 poweroff_vm() {
@@ -132,7 +159,7 @@ poweroff_vm() {
     local deadline=$(( SECONDS + 60 ))
     while vm_running && (( SECONDS < deadline )); do sleep 2; done
     if vm_running; then warn "force-killing qemu"; kill "$(vm_pid)" 2>/dev/null || true; fi
-    rm -f "$RUN/qemu.pid"
+    rm -f "$RUN/qemu.pid" "$RUN/qmp.sock"
 }
 
 # --- provisioning -----------------------------------------------------------
@@ -261,6 +288,7 @@ main() {
         install)  [ $# -ge 1 ] || die "usage: vmtest $distro install <pkg>"; cmd_install "$1" ;;
         run)      [ $# -ge 1 ] || die "usage: vmtest $distro run \"<cmd>\""; cmd_run "$1" ;;
         journal)  [ $# -ge 1 ] || die "usage: vmtest $distro journal <unit>"; cmd_journal "$1" ;;
+        qmp)      [ $# -ge 1 ] || die "usage: vmtest $distro qmp '<json>'"; qmp_send "$1" ;;
         snapshot) cmd_snapshot "${1:-}" ;;
         down)     poweroff_vm ;;
         destroy)  cmd_destroy ;;

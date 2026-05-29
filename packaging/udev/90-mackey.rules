@@ -1,0 +1,9 @@
+# mackey device access.
+#
+# Grant the unprivileged `mackey` group read/write on the uinput node (where the
+# daemon emits synthetic events) and on every keyboard input event device (which
+# the daemon grabs). Group ownership + 0660 is the whole privilege model: mackey
+# never needs root and no login user is added to any group.
+
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="mackey", MODE="0660"
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", GROUP="mackey", MODE="0660"

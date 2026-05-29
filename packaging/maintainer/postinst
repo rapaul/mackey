@@ -1,15 +1,23 @@
 #!/bin/sh
 # mackey post-install scriptlet (shared by the .deb and .rpm).
 #
-# Creates the dedicated, unprivileged system user/group the daemon runs as.
+# Creates the dedicated, unprivileged system user/group the daemon runs as, then
+# loads uinput and applies the udev rules so device access works immediately.
 # Idempotent: re-running it is a no-op. Per the security contract it deliberately
 # does NOT enable or start mackey.service, never modifies any login user's group
-# membership, and never touches GNOME settings. Its only side effects are
-# creating the mackey user/group and the files already dropped under /usr.
+# membership, and never touches GNOME settings.
 set -e
 
 getent group mackey >/dev/null 2>&1 || groupadd --system mackey
 getent passwd mackey >/dev/null 2>&1 || \
     useradd --system --no-create-home --gid mackey --shell /usr/sbin/nologin mackey
+
+# Load uinput now (modules-load.d handles subsequent boots) and apply the udev
+# rules so /dev/uinput and keyboard nodes pick up the mackey group immediately.
+modprobe uinput >/dev/null 2>&1 || true
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload >/dev/null 2>&1 || true
+    udevadm trigger >/dev/null 2>&1 || true
+fi
 
 exit 0

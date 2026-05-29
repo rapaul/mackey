@@ -7,6 +7,10 @@
 /// The mackey version string, sourced from the crate version at build time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The uinput character device the daemon writes synthetic events to. Access is
+/// granted to the `mackey` group via the packaged udev rule (see M4).
+pub const UINPUT_PATH: &str = "/dev/uinput";
+
 /// What a single heartbeat-loop wait step observed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Wait {
