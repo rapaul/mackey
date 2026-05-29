@@ -8,23 +8,27 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSet, Device, EventType, InputEvent, KeyCode};
 use inotify::{Inotify, WatchMask};
-use mackey_core::{is_keyboard, KeymapEngine, VIRTUAL_KEYBOARD_NAME};
+use mackey_core::{is_keyboard, FocusState, Keymap, KeymapEngine, VIRTUAL_KEYBOARD_NAME};
 
 mod focus;
 
 const INPUT_DIR: &str = "/dev/input";
 
-/// Shared handles the reader threads forward through: the keymap engine (global
-/// modifier state) and the single virtual output keyboard.
+/// Shared handles the reader threads forward through: the keymap engine
+/// (modifier state), the single virtual output keyboard, and the focus state
+/// that selects the active keymap. `start` is the monotonic origin for the
+/// focus timestamps.
 #[derive(Clone)]
 struct Forwarder {
     engine: Arc<Mutex<KeymapEngine>>,
     out: Arc<Mutex<VirtualDevice>>,
+    focus: Arc<Mutex<FocusState>>,
+    start: Instant,
 }
 
 /// Build the virtual output keyboard, advertising the full key range so any
@@ -42,11 +46,11 @@ fn build_virtual_keyboard() -> std::io::Result<VirtualDevice> {
 
 /// Run a batch of input events through the keymap engine, translating EV_KEY
 /// events and passing everything else (SYN, MSC, …) through unchanged.
-fn translate(engine: &mut KeymapEngine, batch: &[InputEvent]) -> Vec<InputEvent> {
+fn translate(engine: &mut KeymapEngine, keymap: &Keymap, batch: &[InputEvent]) -> Vec<InputEvent> {
     let mut out = Vec::with_capacity(batch.len());
     for ev in batch {
         if ev.event_type() == EventType::KEY {
-            for k in engine.process(ev.code(), ev.value()) {
+            for k in engine.process(ev.code(), ev.value(), keymap) {
                 out.push(InputEvent::new(EventType::KEY.0, k.code, k.value));
             }
         } else {
@@ -81,8 +85,14 @@ fn grab_and_forward(path: PathBuf, mut dev: Device, fwd: Forwarder) {
                     return;
                 }
             };
+            // Pick the keymap for the current focus, then translate the batch.
+            let now_ms = fwd.start.elapsed().as_millis() as u64;
+            let keymap = match fwd.focus.lock() {
+                Ok(focus) => focus.active_keymap(now_ms),
+                Err(_) => continue,
+            };
             let translated = match fwd.engine.lock() {
-                Ok(mut engine) => translate(&mut engine, &batch),
+                Ok(mut engine) => translate(&mut engine, keymap, &batch),
                 Err(_) => continue,
             };
             if let Ok(mut out) = fwd.out.lock() {
@@ -151,6 +161,27 @@ fn hotplug_loop(fwd: Forwarder) {
     }
 }
 
+/// Emit a warning the moment focus reports go stale (>5s without an
+/// `UpdateFocus`), once per stale period. The keymap reversion itself is handled
+/// by `FocusState::active_keymap`; this only surfaces it in the journal.
+fn stale_watchdog(focus: Arc<Mutex<FocusState>>, start: Instant) {
+    let mut warned = false;
+    loop {
+        thread::sleep(Duration::from_secs(1));
+        let now_ms = start.elapsed().as_millis() as u64;
+        let stale = match focus.lock() {
+            Ok(focus) => focus.is_stale(now_ms),
+            Err(_) => continue,
+        };
+        if stale && !warned {
+            eprintln!("warning: no UpdateFocus in >5s, falling back to global keymap");
+            warned = true;
+        } else if !stale {
+            warned = false;
+        }
+    }
+}
+
 fn main() {
     eprintln!("mackeyd v{} starting", mackey_core::VERSION);
 
@@ -164,9 +195,15 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // Monotonic origin and shared focus state for keymap selection.
+    let start = Instant::now();
+    let focus_state: Arc<Mutex<FocusState>> = Arc::new(Mutex::new(FocusState::new()));
+
     let fwd = Forwarder {
         engine: Arc::new(Mutex::new(KeymapEngine::new())),
         out,
+        focus: focus_state.clone(),
+        start,
     };
 
     grab_existing(&fwd);
@@ -174,9 +211,13 @@ fn main() {
     let hotplug_fwd = fwd.clone();
     thread::spawn(move || hotplug_loop(hotplug_fwd));
 
-    // The focus tracker records the active app id (used by the keymap from M8).
-    let current_app_id: focus::SharedAppId = Arc::new(Mutex::new(None));
-    thread::spawn(move || focus::serve(current_app_id));
+    // The focus tracker updates the shared focus state on each accepted call.
+    let focus_serve = focus_state.clone();
+    thread::spawn(move || focus::serve(focus_serve, start));
+
+    // Warn (once) when focus reports go stale and the keymap reverts to global.
+    let focus_watch = focus_state.clone();
+    thread::spawn(move || stale_watchdog(focus_watch, start));
 
     // Block until asked to stop. Process exit closes every grabbed fd, which
     // ungrabs the physical keyboards — so input is never left frozen.

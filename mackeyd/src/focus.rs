@@ -10,15 +10,17 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use mackey_core::{FOCUS_TRACKER_NAME, FOCUS_TRACKER_PATH};
+use mackey_core::{FocusState, FOCUS_TRACKER_NAME, FOCUS_TRACKER_PATH};
 use zbus::message::Header;
 use zbus::names::{BusName, UniqueName};
 use zbus::zvariant::OwnedObjectPath;
 use zbus::{connection, fdo, interface, Connection, Proxy};
 
-/// The currently-focused app id, shared with the keymap engine (read from M8).
-pub type SharedAppId = Arc<Mutex<Option<String>>>;
+/// The focus state shared with the reader threads, which read it to pick the
+/// active keymap per key event.
+pub type SharedFocus = Arc<Mutex<FocusState>>;
 
 /// Resolves the uid of the active local-seat session for a given connection.
 /// Boxed so the unit test can substitute a fixed value for the live logind
@@ -35,7 +37,9 @@ fn logind_seat_resolver() -> SeatUidResolver {
 }
 
 struct FocusTracker {
-    current_app_id: SharedAppId,
+    focus: SharedFocus,
+    /// Monotonic origin for the focus timestamps the stale-fallback uses.
+    start: Instant,
     active_seat_uid: SeatUidResolver,
 }
 
@@ -60,7 +64,15 @@ impl FocusTracker {
             eprintln!("rejected UpdateFocus from uid={sender_uid}");
             return;
         }
-        *self.current_app_id.lock().unwrap() = Some(app_id.clone());
+        let now_ms = self.start.elapsed().as_millis() as u64;
+        let mut state = self.focus.lock().unwrap();
+        let prev = state.active_keymap(now_ms).id;
+        state.update(app_id.clone(), now_ms);
+        let active = state.active_keymap(now_ms).id;
+        drop(state);
+        if active != prev {
+            eprintln!("keymap → {active}");
+        }
         eprintln!("accepted UpdateFocus app_id={app_id}");
     }
 }
@@ -99,15 +111,16 @@ async fn active_seat_uid(conn: &Connection) -> Option<u32> {
 }
 
 /// Run the focus tracker. Blocks forever; call from a dedicated thread.
-pub fn serve(current_app_id: SharedAppId) {
-    if let Err(e) = zbus::block_on(run(current_app_id)) {
+pub fn serve(focus: SharedFocus, start: Instant) {
+    if let Err(e) = zbus::block_on(run(focus, start)) {
         eprintln!("focus tracker D-Bus error: {e}");
     }
 }
 
-async fn run(current_app_id: SharedAppId) -> zbus::Result<()> {
+async fn run(focus: SharedFocus, start: Instant) -> zbus::Result<()> {
     let tracker = FocusTracker {
-        current_app_id,
+        focus,
+        start,
         active_seat_uid: logind_seat_resolver(),
     };
     let _conn = connection::Builder::system()?
@@ -173,10 +186,11 @@ mod tests {
     /// `UpdateFocus(app_id, ..)` from a client on the same bus. Returns what the
     /// tracker recorded — `Some(app_id)` if it accepted, `None` if it rejected.
     async fn serve_and_call(addr: &str, seat_uid: u32, app_id: &str) -> Option<String> {
-        let recorded: SharedAppId = Arc::new(Mutex::new(None));
+        let focus: SharedFocus = Arc::new(Mutex::new(FocusState::new()));
         let resolver: SeatUidResolver = Box::new(move |_| Box::pin(async move { Some(seat_uid) }));
         let tracker = FocusTracker {
-            current_app_id: recorded.clone(),
+            focus: focus.clone(),
+            start: Instant::now(),
             active_seat_uid: resolver,
         };
         // Serve on its own unique name (no well-known name) so successive calls
@@ -201,7 +215,7 @@ mod tests {
         .unwrap();
         let _: () = proxy.call("UpdateFocus", &(app_id, "title")).await.unwrap();
 
-        let got = recorded.lock().unwrap().clone();
+        let got = focus.lock().unwrap().app_id().map(str::to_owned);
         got
     }
 

@@ -7,7 +7,7 @@
 use evdev::{AttributeSetRef, KeyCode};
 
 mod keymap;
-pub use keymap::{KeyEvent, KeymapEngine};
+pub use keymap::{FocusState, KeyEvent, Keymap, KeymapEngine, STALE_MS};
 
 /// The mackey version string, sourced from the crate version at build time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
