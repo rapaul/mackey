@@ -1,0 +1,16 @@
+[package]
+name = "mackey-gui"
+description = "The mackey GTK4 wizard/status application."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mackey"
+path = "src/main.rs"
+
+[dependencies]
+mackey-core.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "mackeyd"
+description = "The mackey daemon: grabs keyboards via evdev, emits via uinput."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mackeyd"
+path = "src/main.rs"
+
+[dependencies]
+mackey-core.workspace = true

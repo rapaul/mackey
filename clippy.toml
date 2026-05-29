@@ -1,0 +1,2 @@
+# Project-wide clippy configuration.
+# Keep defaults; lint levels are enforced via `-D warnings` in the gate.
