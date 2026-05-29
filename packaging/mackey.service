@@ -1,0 +1,14 @@
+[Unit]
+Description=mackey keyboard remapper
+Documentation=https://github.com/richardapaul/mackey
+After=multi-user.target
+
+[Service]
+Type=simple
+User=mackey
+Group=mackey
+ExecStart=/usr/bin/mackeyd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
