@@ -28,6 +28,24 @@ else
     echo "!! eslint not found; skipping (run 'npm i -g eslint' to enable)"
 fi
 
+echo "== systemd unit hardening =="
+unit=packaging/mackey.service
+baseline_file=packaging/mackey.service.exposure-baseline
+if command -v systemd-analyze >/dev/null; then
+    systemd-analyze verify "$unit" || true   # warns the binary isn't installed; not fatal
+    score="$(systemd-analyze security --offline=true "$unit" 2>/dev/null \
+        | sed -n 's/.*Overall exposure level[^:]*:[[:space:]]*\([0-9.]*\).*/\1/p')"
+    baseline="$(grep -vE '^[[:space:]]*#' "$baseline_file" | tr -d '[:space:]')"
+    echo "  -> exposure $score (baseline $baseline)"
+    if awk "BEGIN { exit !($score > $baseline) }"; then
+        echo "!! security regression: exposure $score is worse than baseline $baseline" >&2
+        echo "   review the change or, if intentional tightening, lower $baseline_file" >&2
+        exit 1
+    fi
+else
+    echo "!! systemd-analyze not found; skipping hardening check"
+fi
+
 echo "== polkit policy =="
 policy=packaging/polkit/app.mackey.policy
 dtd=/usr/share/polkit-1/policyconfig-1.dtd

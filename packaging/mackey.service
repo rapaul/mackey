@@ -10,5 +10,32 @@ Group=mackey
 ExecStart=/usr/bin/mackeyd
 Restart=on-failure
 
+# Hardening. The daemon needs no capabilities (it opens /dev/uinput and the
+# keyboard nodes via the mackey-group ACL), no network (the system bus is an
+# AF_UNIX socket), and writes nothing to disk. Note: PrivateDevices is
+# deliberately NOT set — it would hide /dev/input and /dev/uinput, which the
+# daemon must access.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+
 [Install]
 WantedBy=multi-user.target

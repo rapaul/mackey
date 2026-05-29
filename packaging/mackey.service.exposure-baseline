@@ -1,0 +1,5 @@
+# systemd-analyze security exposure baseline for mackey.service.
+# Lower is better; the build fails if the unit's exposure regresses ABOVE this.
+# Lower it (and commit) only when the hardening is intentionally tightened.
+# Computed with: systemd-analyze security --offline=true packaging/mackey.service
+1.3
