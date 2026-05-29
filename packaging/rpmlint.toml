@@ -1,0 +1,18 @@
+# rpmlint configuration for mackey's RPM.
+#
+# These filters suppress findings that are structural to how the package is
+# produced, not packaging defects. Each is justified below. M11 tightens the
+# remaining warnings to errors against a tracked baseline; these stay filtered.
+Filters = [
+    # Dev/CI builds are unsigned; signing is a release-time step (M12).
+    ".*: E: no-signature",
+    # cargo-generate-rpm intentionally omits BuildHost for reproducible builds.
+    ".*: E: no-buildhost-tag",
+    # cargo-generate-rpm does not emit a Packager tag; Maintainer/URL identify
+    # the origin instead.
+    ".*: E: no-packager-tag",
+    # The MVP packaging carries no RPM %changelog; release notes live in git.
+    ".*: E: no-changelogname-tag",
+    # The RPM Group tag is deprecated on modern Fedora; rpmlint's check is legacy.
+    ".*: E: no-group-tag",
+]

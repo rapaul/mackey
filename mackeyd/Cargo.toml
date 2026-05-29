@@ -14,3 +14,24 @@ path = "src/main.rs"
 
 [dependencies]
 mackey-core.workspace = true
+
+# --- Debian packaging (cargo-deb) -------------------------------------------
+# M1: ship only /usr/bin/mackeyd. The systemd unit, udev rule, and policy
+# files are added from M3 onward.
+[package.metadata.deb]
+maintainer = "Richard Paul <richard.a.paul@gmail.com>"
+copyright = "2026, Richard Paul"
+section = "utils"
+priority = "optional"
+# Built on Fedora where dpkg-shlibdeps is unavailable, so the $auto resolver
+# yields nothing. The binary is dynamically linked against glibc -> libc6.
+depends = "libc6"
+extended-description = "macOS-style keyboard shortcuts on Linux (GNOME/Wayland). This package ships the mackey daemon."
+assets = [["target/release/mackeyd", "usr/bin/", "755"]]
+
+# --- RPM packaging (cargo-generate-rpm) -------------------------------------
+[package.metadata.generate-rpm]
+summary = "macOS-style keyboard shortcuts on Linux (GNOME/Wayland)"
+assets = [
+    { source = "target/release/mackeyd", dest = "/usr/bin/mackeyd", mode = "0755" },
+]
