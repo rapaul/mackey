@@ -27,6 +27,12 @@ cargo test --workspace
 If any of these fail, fix the cause before committing — don't `--no-verify`, don't
 disable a lint, don't delete a failing test to make the gate pass.
 
+**No remote CI.** Everything builds, tests, and verifies locally — there is no
+hosted CI pipeline. Wherever `MILESTONES.md` says a check "runs in CI," run it on
+the dev box (or in a local VM) instead: `scripts/build-packages.sh` for the
+`.deb`/`.rpm` and their linters, the `vmtest` harness for VM integration tests.
+The gate above is yours to run before each commit.
+
 Commit messages: imperative subject line, reference the milestone when relevant
 (e.g. `M5: forward evdev events to uinput unmodified`).
 
