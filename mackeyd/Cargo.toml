@@ -42,6 +42,7 @@ assets = [
     ["../packaging/udev/90-mackey.rules", "usr/lib/udev/rules.d/", "644"],
     ["../packaging/modules-load/mackey.conf", "usr/lib/modules-load.d/", "644"],
     ["../packaging/dbus/app.mackey.conf", "usr/share/dbus-1/system.d/", "644"],
+    ["../target/gnome-extension/mackey@mackey.app.shell-extension.zip", "usr/share/mackey/gnome-extension/", "644"],
 ]
 
 # --- RPM packaging (cargo-generate-rpm) -------------------------------------
@@ -82,4 +83,5 @@ assets = [
     { source = "packaging/udev/90-mackey.rules", dest = "/usr/lib/udev/rules.d/90-mackey.rules", mode = "0644" },
     { source = "packaging/modules-load/mackey.conf", dest = "/usr/lib/modules-load.d/mackey.conf", mode = "0644" },
     { source = "packaging/dbus/app.mackey.conf", dest = "/usr/share/dbus-1/system.d/app.mackey.conf", mode = "0644" },
+    { source = "target/gnome-extension/mackey@mackey.app.shell-extension.zip", dest = "/usr/share/mackey/gnome-extension/mackey@mackey.app.shell-extension.zip", mode = "0644" },
 ]

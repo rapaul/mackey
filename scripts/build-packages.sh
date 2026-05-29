@@ -12,6 +12,22 @@ cd "$repo_root"
 echo "== building release binary =="
 cargo build --release -p mackeyd
 
+echo "== gnome extension =="
+ext_out="target/gnome-extension"
+mkdir -p "$ext_out"
+# `gnome-extensions pack` is the structural lint: it validates metadata.json and
+# the bundle layout, and fails the build on a malformed extension.
+gnome-extensions pack gnome-extension --out-dir "$ext_out" --force
+echo "  -> $ext_out/mackey@mackey.app.shell-extension.zip"
+# eslint is best-effort (not installed on the dev box by default); skip if absent
+# rather than pulling it from the network, mirroring the rpmlint handling below.
+if npx --no-install eslint --version >/dev/null 2>&1; then
+    echo "== eslint =="
+    (cd gnome-extension && npx --no-install eslint extension.js)
+else
+    echo "!! eslint not found; skipping (run 'npm i -g eslint' to enable)"
+fi
+
 echo "== cargo deb =="
 deb="$(cargo deb -p mackeyd | tail -1)"
 echo "  -> $deb"

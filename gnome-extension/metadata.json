@@ -1,0 +1,8 @@
+{
+  "uuid": "mackey@mackey.app",
+  "name": "mackey focus tracker",
+  "description": "Reports the focused window's application id to the mackey daemon over the system bus so it can apply per-app keymaps. Has no UI and no preferences.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/richardapaul/mackey",
+  "version": 1
+}
