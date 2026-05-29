@@ -1,35 +1,45 @@
-//! The GTK4 wizard window.
+//! The GTK4 wizard + status window.
 //!
 //! [`WizardUi`] owns a [`gtk::Stack`] with two pages — the setup wizard and the
-//! placeholder "ready" screen — and swaps between them from a [`SetupState`].
-//! It is built independently of the [`adw::Application`] so its rendering can be
-//! exercised in a unit test. The wizard only ever *displays* commands (with a
-//! Copy button); it never runs anything on the user's behalf.
+//! status view — and the policy of which to show lives in `main`'s poll. The
+//! wizard only ever *displays* commands (with a Copy button); the status view's
+//! Pause/Resume toggle runs the polkit-authorized helper via pkexec (no prompt
+//! for the active seat user). It is built independently of the
+//! [`adw::Application`] so its rendering can be exercised in a unit test.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{glib, Align, Orientation};
 
-use crate::setup::SetupState;
-use crate::view::{screen_for, wizard_steps, Screen, WizardStep};
+use crate::setup::{
+    detect_service_state, set_service_running, ServiceState, SetupState, SystemRunner,
+};
+use crate::view::{wizard_steps, WizardStep};
 
 const WIZARD_PAGE: &str = "wizard";
-const READY_PAGE: &str = "ready";
+const STATUS_PAGE: &str = "status";
 
-/// Handle to the wizard widgets. GTK widgets are reference-counted GObjects, so
-/// cloning shares the same underlying widgets — cheap, and lets the 5s poll
-/// closure own a handle alongside the window.
 #[derive(Clone)]
 pub struct WizardUi {
     stack: gtk::Stack,
     /// Container the wizard steps are rebuilt into on each update.
     steps: gtk::Box,
+    /// Status view widgets and the daemon state they last rendered.
+    status_label: gtk::Label,
+    toggle: gtk::Button,
+    service: Rc<Cell<ServiceState>>,
+    /// Set once the status view is shown; `main` then stops reverting to the
+    /// wizard in-session (regressions are caught on the next launch).
+    settled: Rc<Cell<bool>>,
 }
 
 impl WizardUi {
     pub fn new() -> Self {
         let stack = gtk::Stack::new();
 
-        // Wizard page: heading + the steps container, in a scroll view.
+        // Wizard page: heading + steps container, in a scroll view.
         let steps = gtk::Box::new(Orientation::Vertical, 18);
         steps.set_margin_top(24);
         steps.set_margin_bottom(24);
@@ -48,15 +58,49 @@ impl WizardUi {
             .build();
         stack.add_named(&scroller, Some(WIZARD_PAGE));
 
-        // Ready page: a placeholder until the status view lands in M10.
-        let ready = adw::StatusPage::builder()
-            .icon_name("emblem-ok-symbolic")
-            .title("mackey is set up")
-            .description("The daemon is running and the GNOME extension is enabled.")
-            .build();
-        stack.add_named(&ready, Some(READY_PAGE));
+        // Status page: daemon state + a single Pause/Resume toggle.
+        let status_box = gtk::Box::new(Orientation::Vertical, 18);
+        status_box.set_valign(Align::Center);
+        status_box.set_halign(Align::Center);
+        status_box.set_vexpand(true);
+        let status_label = gtk::Label::new(None);
+        status_label.add_css_class("title-2");
+        let toggle = gtk::Button::with_label("Pause");
+        toggle.add_css_class("pill");
+        toggle.set_halign(Align::Center);
+        status_box.append(&status_label);
+        status_box.append(&toggle);
+        stack.add_named(&status_box, Some(STATUS_PAGE));
 
-        Self { stack, steps }
+        let service = Rc::new(Cell::new(ServiceState::Paused));
+
+        // The toggle pauses when active and resumes otherwise, then re-renders
+        // from the freshly-detected state.
+        toggle.connect_clicked(glib::clone!(
+            #[weak]
+            status_label,
+            #[strong]
+            service,
+            move |toggle| {
+                let running = service.get() != ServiceState::Active;
+                set_service_running(&SystemRunner, running);
+                render_status(
+                    &status_label,
+                    toggle,
+                    &service,
+                    detect_service_state(&SystemRunner),
+                );
+            }
+        ));
+
+        Self {
+            stack,
+            steps,
+            status_label,
+            toggle,
+            service,
+            settled: Rc::new(Cell::new(false)),
+        }
     }
 
     /// The root widget to place in a window.
@@ -64,15 +108,20 @@ impl WizardUi {
         &self.stack
     }
 
-    /// The name of the currently-visible page (`"wizard"` or `"ready"`).
+    /// Whether the status view has been shown (so `main` stops reverting).
+    pub fn is_settled(&self) -> bool {
+        self.settled.get()
+    }
+
+    /// The name of the currently-visible page (`"wizard"` or `"status"`).
     #[cfg(test)]
     pub fn visible_page(&self) -> Option<String> {
         self.stack.visible_child_name().map(|s| s.to_string())
     }
 
-    /// Re-render for the given state: rebuild the step rows and select the page.
-    pub fn update(&self, state: SetupState) {
-        // Clear previously-rendered step rows, keeping the heading (first child).
+    /// Show the setup wizard, rebuilding the step rows for `state`.
+    pub fn show_wizard(&self, state: SetupState) {
+        // Clear previously-rendered step rows, keeping the heading.
         let mut child = self.steps.first_child();
         while let Some(widget) = child {
             child = widget.next_sibling();
@@ -83,13 +132,32 @@ impl WizardUi {
         for step in wizard_steps(state) {
             self.steps.append(&build_step(&step));
         }
-
-        let page = match screen_for(state) {
-            Screen::Wizard => WIZARD_PAGE,
-            Screen::Ready => READY_PAGE,
-        };
-        self.stack.set_visible_child_name(page);
+        self.stack.set_visible_child_name(WIZARD_PAGE);
     }
+
+    /// Show the status view for the daemon's current state.
+    pub fn show_status(&self, state: ServiceState) {
+        render_status(&self.status_label, &self.toggle, &self.service, state);
+        self.stack.set_visible_child_name(STATUS_PAGE);
+        self.settled.set(true);
+    }
+}
+
+/// Render the status label and toggle for a daemon state.
+fn render_status(
+    label: &gtk::Label,
+    toggle: &gtk::Button,
+    service: &Rc<Cell<ServiceState>>,
+    state: ServiceState,
+) {
+    service.set(state);
+    let (text, action) = match state {
+        ServiceState::Active => ("mackey is active", "Pause"),
+        ServiceState::Paused => ("mackey is paused", "Resume"),
+        ServiceState::Failed => ("mackey failed to start", "Resume"),
+    };
+    label.set_text(text);
+    toggle.set_label(action);
 }
 
 /// Build the card for one wizard step.
@@ -176,29 +244,32 @@ mod tests {
     }
 
     #[test]
-    fn flipping_state_swaps_the_visible_page() {
+    fn wizard_and_status_swap_the_visible_page() {
         if !gtk_ready() {
             return;
         }
         let ui = WizardUi::new();
 
-        ui.update(SetupState {
+        ui.show_wizard(SetupState {
             service_active: false,
             extension_enabled: false,
         });
         assert_eq!(ui.visible_page().as_deref(), Some("wizard"));
+        assert!(!ui.is_settled());
 
-        ui.update(SetupState {
-            service_active: true,
-            extension_enabled: true,
-        });
-        assert_eq!(ui.visible_page().as_deref(), Some("ready"));
+        ui.show_status(ServiceState::Active);
+        assert_eq!(ui.visible_page().as_deref(), Some("status"));
+        assert_eq!(
+            ui.toggle.label().map(|s| s.to_string()).as_deref(),
+            Some("Pause")
+        );
+        assert!(ui.is_settled());
 
-        // And back to the wizard if a prerequisite regresses.
-        ui.update(SetupState {
-            service_active: true,
-            extension_enabled: false,
-        });
-        assert_eq!(ui.visible_page().as_deref(), Some("wizard"));
+        // Paused state flips the toggle to Resume.
+        ui.show_status(ServiceState::Paused);
+        assert_eq!(
+            ui.toggle.label().map(|s| s.to_string()).as_deref(),
+            Some("Resume")
+        );
     }
 }

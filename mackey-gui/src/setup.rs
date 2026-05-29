@@ -11,6 +11,10 @@ use std::process::Command;
 /// The UUID of the bundled GNOME Shell extension (see `gnome-extension/`).
 const EXTENSION_UUID: &str = "mackey@mackey.app";
 
+/// The polkit-authorized helper that pauses/resumes the daemon (see
+/// `packaging/mackey-service-control`).
+const SERVICE_CONTROL: &str = "/usr/libexec/mackey-service-control";
+
 /// Runs a command and returns its trimmed stdout. A command that fails to spawn
 /// yields an empty string, which reads as "prerequisite not satisfied".
 pub trait CommandRunner {
@@ -54,6 +58,36 @@ pub fn detect(runner: &dyn CommandRunner) -> SetupState {
         service_active: service.trim() == "active",
         extension_enabled: extensions.lines().any(|line| line.trim() == EXTENSION_UUID),
     }
+}
+
+/// The daemon's runtime state, shown in the status view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceState {
+    Active,
+    Paused,
+    Failed,
+}
+
+/// Map `systemctl is-active` output to a [`ServiceState`]. Anything that isn't
+/// `active` or `failed` (e.g. `inactive`, `deactivating`) reads as paused.
+pub fn service_state_from(is_active_output: &str) -> ServiceState {
+    match is_active_output.trim() {
+        "active" => ServiceState::Active,
+        "failed" => ServiceState::Failed,
+        _ => ServiceState::Paused,
+    }
+}
+
+/// Detect the daemon's current runtime state.
+pub fn detect_service_state(runner: &dyn CommandRunner) -> ServiceState {
+    service_state_from(&runner.run("systemctl", &["is-active", "mackey.service"]))
+}
+
+/// Pause (`running = false`) or resume (`running = true`) the daemon through the
+/// polkit-authorized helper, via pkexec — no prompt for the active seat user.
+pub fn set_service_running(runner: &dyn CommandRunner, running: bool) {
+    let verb = if running { "start" } else { "stop" };
+    runner.run("pkexec", &[SERVICE_CONTROL, verb]);
 }
 
 #[cfg(test)]
@@ -132,5 +166,47 @@ mod tests {
         // A line that merely contains the UUID as a substring must not count.
         let s = state("active", "not-mackey@mackey.app.evil");
         assert!(!s.extension_enabled);
+    }
+
+    #[test]
+    fn service_state_maps_systemctl_output() {
+        assert_eq!(service_state_from("active"), ServiceState::Active);
+        assert_eq!(service_state_from("failed"), ServiceState::Failed);
+        assert_eq!(service_state_from("inactive"), ServiceState::Paused);
+        assert_eq!(service_state_from("deactivating"), ServiceState::Paused);
+        assert_eq!(service_state_from(""), ServiceState::Paused);
+    }
+
+    /// A runner that records every command it was asked to run.
+    #[derive(Default)]
+    struct RecordingRunner {
+        calls: std::cell::RefCell<Vec<Vec<String>>>,
+    }
+
+    impl CommandRunner for RecordingRunner {
+        fn run(&self, program: &str, args: &[&str]) -> String {
+            let mut call = vec![program.to_string()];
+            call.extend(args.iter().map(|a| a.to_string()));
+            self.calls.borrow_mut().push(call);
+            String::new()
+        }
+    }
+
+    #[test]
+    fn pause_stops_and_resume_starts_via_pkexec_helper() {
+        let runner = RecordingRunner::default();
+        set_service_running(&runner, false); // pause
+        set_service_running(&runner, true); // resume
+        let calls = runner.calls.borrow();
+        assert_eq!(
+            calls[0],
+            ["pkexec", SERVICE_CONTROL, "stop"],
+            "pause runs the helper with stop"
+        );
+        assert_eq!(
+            calls[1],
+            ["pkexec", SERVICE_CONTROL, "start"],
+            "resume runs the helper with start"
+        );
     }
 }
