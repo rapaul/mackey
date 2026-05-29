@@ -1,12 +1,12 @@
-# PRD: mackey — a Rust port of Toshy
+# PRD: mackey
 
 ## Context
 
-Linux users coming from macOS lose their muscle memory the moment they switch desktops: Ctrl vs Cmd, different shortcut combinations in every app, and Option-key special characters that just don't exist. [Toshy](https://github.com/RedBearAK/toshy) solves this on Linux today, but it's a Python application built on top of `xwaykeyz`/`keyszer` — a stack that ships a Python virtualenv, runs an installer script that touches the system in many places, and is comparatively heavy to package and distribute cleanly.
+Linux users coming from macOS lose their muscle memory the moment they switch desktops: Ctrl vs Cmd, different shortcut combinations in every app, and Option-key special characters that just don't exist. Existing solutions on Linux tend to be Python applications built on top of stacks that ship a virtualenv, run an installer script that touches the system in many places, and are comparatively heavy to package and distribute cleanly.
 
-**mackey** is a Rust rewrite of Toshy with a deliberately narrow MVP: ship a single statically-linked daemon plus a small GTK4 setup-and-status app, distributed as `.rpm` and `.deb` packages whose post-install does as little as possible. On first launch the GUI walks the user through the one-time system setup (enabling the systemd system service, installing the GNOME Shell extension) and then gets out of the way. Keybindings are compiled into the daemon — the MVP has no user-facing config; that lands in v0.2.
+**mackey** has a deliberately narrow MVP: ship a single statically-linked daemon plus a small GTK4 setup-and-status app, distributed as `.rpm` and `.deb` packages whose post-install does as little as possible. On first launch the GUI walks the user through the one-time system setup (enabling the systemd system service, installing the GNOME Shell extension) and then gets out of the way. Keybindings are compiled into the daemon — the MVP has no user-facing config; that lands in v0.2.
 
-The goal is *not* feature parity with Toshy on day one. The goal is a clean foundation that nails the most common case — a MacBook-layout keyboard on Fedora or Ubuntu running GNOME on Wayland — and is easy to extend.
+The goal is a clean foundation that nails the most common case — a MacBook-layout keyboard on Fedora or Ubuntu running GNOME on Wayland — and is easy to extend.
 
 ## Goals
 
@@ -18,11 +18,11 @@ The goal is *not* feature parity with Toshy on day one. The goal is a clean foun
 ## Non-goals (MVP)
 
 - X11 support, KDE / Sway / Hyprland / COSMIC support — GNOME Wayland only.
-- The 600+ Option-key special characters from Toshy.
+- The 600+ Option-key special characters.
 - Multi-tap, hold-to-modify, and other advanced layering features.
 - Per-keyboard-device profiles or runtime device hotswap intelligence beyond "it works when you plug one in".
 - Windows / macOS support.
-- Migration tooling for existing Toshy / xremap / kanata configurations.
+- Migration tooling for existing xremap / kanata configurations.
 - User-editable keybindings (no config file, no GUI editor — bindings are compiled into the daemon).
 
 ## Target user
