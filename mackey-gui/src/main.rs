@@ -1,8 +1,20 @@
 //! The mackey GUI: a GTK4 wizard/status window.
 //!
-//! At M0 this is a placeholder binary so the workspace builds three crates.
-//! The real GTK4 app lands in M9.
+//! M9 (in progress): the setup-state detection layer is in place and unit
+//! tested. The GTK4 wizard window is built on top of it next, once the GTK
+//! development libraries are available. For now the binary prints the detected
+//! setup state so the layer is exercised end to end.
+
+mod setup;
+
+use setup::{detect, SystemRunner};
 
 fn main() {
-    println!("mackey GUI v{} (placeholder)", mackey_core::VERSION);
+    let state = detect(&SystemRunner);
+    let phase = if state.is_complete() {
+        "set up"
+    } else {
+        "wizard"
+    };
+    println!("mackey GUI v{} — {phase} ({state:?})", mackey_core::VERSION);
 }
