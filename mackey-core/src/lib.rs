@@ -1,8 +1,10 @@
 //! Shared types and the keymap engine for mackey.
 //!
-//! This crate is the pure, heavily-tested core: built-in keymap tables, IPC
-//! message types, and the table-driven keymap engine. It has no I/O and no
-//! kernel dependencies so it can be unit-tested in isolation.
+//! This crate is the pure, heavily-tested core. At M5 it holds the device
+//! classification used to decide which input devices the daemon grabs; the
+//! keymap engine lands in M6.
+
+use evdev::{AttributeSetRef, KeyCode};
 
 /// The mackey version string, sourced from the crate version at build time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -11,34 +13,27 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// granted to the `mackey` group via the packaged udev rule (see M4).
 pub const UINPUT_PATH: &str = "/dev/uinput";
 
-/// What a single heartbeat-loop wait step observed.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Wait {
-    /// The heartbeat interval elapsed; the loop should emit a beat.
-    Tick,
-    /// Shutdown was requested; the loop should stop.
-    Shutdown,
-}
+/// The name of the daemon's virtual output keyboard. The daemon must never grab
+/// this device back (that would be a feedback loop), so callers identify it by
+/// this name.
+pub const VIRTUAL_KEYBOARD_NAME: &str = "mackey virtual keyboard";
 
-/// Drive the daemon's heartbeat loop: call `wait` repeatedly, emitting a beat on
-/// each [`Wait::Tick`] and returning as soon as it observes [`Wait::Shutdown`].
+/// Whether a device's set of supported keys makes it a keyboard worth grabbing.
 ///
-/// All timing and signal handling lives in the caller's `wait` closure, which
-/// keeps this loop free of timers and OS signals and therefore unit-testable: a
-/// test supplies a `wait` returning a fixed sequence and asserts the beats.
-pub fn heartbeat_loop<W, B>(mut wait: W, mut beat: B)
-where
-    W: FnMut() -> Wait,
-    B: FnMut(),
-{
-    while let Wait::Tick = wait() {
-        beat();
-    }
+/// The heuristic requires the core alphabetic keys plus space, which a real
+/// keyboard always has and which mice, consumer-control surfaces, power
+/// buttons, and the like do not. Kept here (away from any I/O) so it can be
+/// unit-tested with in-memory `AttributeSet`s, no kernel required.
+pub fn is_keyboard(keys: &AttributeSetRef<KeyCode>) -> bool {
+    keys.contains(KeyCode::KEY_A)
+        && keys.contains(KeyCode::KEY_Z)
+        && keys.contains(KeyCode::KEY_SPACE)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use evdev::{AttributeSet, KeyCode};
 
     #[test]
     fn version_is_populated() {
@@ -46,27 +41,31 @@ mod tests {
     }
 
     #[test]
-    fn beats_each_tick_then_stops_on_shutdown() {
-        let mut ticks_left = 3;
-        let mut beats = 0;
-        heartbeat_loop(
-            || {
-                if ticks_left > 0 {
-                    ticks_left -= 1;
-                    Wait::Tick
-                } else {
-                    Wait::Shutdown
-                }
-            },
-            || beats += 1,
-        );
-        assert_eq!(beats, 3);
+    fn full_keyboard_is_recognized() {
+        let mut keys = AttributeSet::<KeyCode>::new();
+        for k in [
+            KeyCode::KEY_A,
+            KeyCode::KEY_Z,
+            KeyCode::KEY_SPACE,
+            KeyCode::KEY_ENTER,
+        ] {
+            keys.insert(k);
+        }
+        assert!(is_keyboard(&keys));
     }
 
     #[test]
-    fn immediate_shutdown_emits_no_beats() {
-        let mut beats = 0;
-        heartbeat_loop(|| Wait::Shutdown, || beats += 1);
-        assert_eq!(beats, 0);
+    fn non_keyboard_devices_are_rejected() {
+        // A consumer-control / volume surface: has keys, but not the core set.
+        let mut keys = AttributeSet::<KeyCode>::new();
+        keys.insert(KeyCode::KEY_VOLUMEUP);
+        keys.insert(KeyCode::KEY_VOLUMEDOWN);
+        assert!(!is_keyboard(&keys));
+
+        // Missing just one required key is still not a keyboard.
+        let mut almost = AttributeSet::<KeyCode>::new();
+        almost.insert(KeyCode::KEY_A);
+        almost.insert(KeyCode::KEY_Z);
+        assert!(!is_keyboard(&almost));
     }
 }
