@@ -21,6 +21,18 @@ pub const UINPUT_PATH: &str = "/dev/uinput";
 /// this name.
 pub const VIRTUAL_KEYBOARD_NAME: &str = "mackey virtual keyboard";
 
+/// The system-bus name and object path the daemon's focus tracker owns.
+pub const FOCUS_TRACKER_NAME: &str = "app.mackey.FocusTracker";
+pub const FOCUS_TRACKER_PATH: &str = "/app/mackey/FocusTracker";
+
+/// The payload of an `UpdateFocus` call: the focused window's desktop app id and
+/// its title. Carried over D-Bus as `(ss)`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, zvariant::Type)]
+pub struct FocusUpdate {
+    pub app_id: String,
+    pub window_title: String,
+}
+
 /// Whether a device's set of supported keys makes it a keyboard worth grabbing.
 ///
 /// The heuristic requires the core alphabetic keys plus space, which a real
@@ -41,6 +53,22 @@ mod tests {
     #[test]
     fn version_is_populated() {
         assert!(!VERSION.is_empty());
+    }
+
+    #[test]
+    fn focus_update_round_trips_over_dbus_encoding() {
+        use zvariant::{serialized::Context, to_bytes, Endian, Type};
+        // The D-Bus signature must be a struct of two strings.
+        assert_eq!(FocusUpdate::SIGNATURE.to_string(), "(ss)");
+
+        let original = FocusUpdate {
+            app_id: "firefox.desktop".to_string(),
+            window_title: "Mozilla Firefox".to_string(),
+        };
+        let ctxt = Context::new_dbus(Endian::Little, 0);
+        let encoded = to_bytes(ctxt, &original).unwrap();
+        let (decoded, _): (FocusUpdate, usize) = encoded.deserialize().unwrap();
+        assert_eq!(original, decoded);
     }
 
     #[test]

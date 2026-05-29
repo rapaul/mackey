@@ -15,6 +15,8 @@ use evdev::{AttributeSet, Device, EventType, InputEvent, KeyCode};
 use inotify::{Inotify, WatchMask};
 use mackey_core::{is_keyboard, KeymapEngine, VIRTUAL_KEYBOARD_NAME};
 
+mod focus;
+
 const INPUT_DIR: &str = "/dev/input";
 
 /// Shared handles the reader threads forward through: the keymap engine (global
@@ -171,6 +173,10 @@ fn main() {
 
     let hotplug_fwd = fwd.clone();
     thread::spawn(move || hotplug_loop(hotplug_fwd));
+
+    // The focus tracker records the active app id (used by the keymap from M8).
+    let current_app_id: focus::SharedAppId = Arc::new(Mutex::new(None));
+    thread::spawn(move || focus::serve(current_app_id));
 
     // Block until asked to stop. Process exit closes every grabbed fd, which
     // ungrabs the physical keyboards — so input is never left frozen.
