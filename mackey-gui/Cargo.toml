@@ -14,3 +14,5 @@ path = "src/main.rs"
 
 [dependencies]
 mackey-core.workspace = true
+gtk = { package = "gtk4", version = "0.9", features = ["v4_10"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_4"] }

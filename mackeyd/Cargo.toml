@@ -33,11 +33,13 @@ section = "utils"
 priority = "optional"
 # Built on Fedora where dpkg-shlibdeps is unavailable, so the $auto resolver
 # yields nothing. The binary is dynamically linked against glibc -> libc6.
-depends = "libc6"
+depends = "libc6, libgtk-4-1, libadwaita-1-0"
 maintainer-scripts = "../packaging/maintainer"
-extended-description = "macOS-style keyboard shortcuts on Linux (GNOME/Wayland). This package ships the mackey daemon."
+extended-description = "macOS-style keyboard shortcuts on Linux (GNOME/Wayland). This package ships the mackey daemon and the mackey setup GUI."
 assets = [
     ["target/release/mackeyd", "usr/bin/", "755"],
+    ["target/release/mackey", "usr/bin/", "755"],
+    ["../packaging/mackey.desktop", "usr/share/applications/", "644"],
     ["../packaging/mackey.service", "usr/lib/systemd/system/", "644"],
     ["../packaging/udev/90-mackey.rules", "usr/lib/udev/rules.d/", "644"],
     ["../packaging/modules-load/mackey.conf", "usr/lib/modules-load.d/", "644"],
@@ -79,6 +81,8 @@ exit 0
 '''
 assets = [
     { source = "target/release/mackeyd", dest = "/usr/bin/mackeyd", mode = "0755" },
+    { source = "target/release/mackey", dest = "/usr/bin/mackey", mode = "0755" },
+    { source = "packaging/mackey.desktop", dest = "/usr/share/applications/mackey.desktop", mode = "0644" },
     { source = "packaging/mackey.service", dest = "/usr/lib/systemd/system/mackey.service", mode = "0644" },
     { source = "packaging/udev/90-mackey.rules", dest = "/usr/lib/udev/rules.d/90-mackey.rules", mode = "0644" },
     { source = "packaging/modules-load/mackey.conf", dest = "/usr/lib/modules-load.d/mackey.conf", mode = "0644" },

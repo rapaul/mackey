@@ -1,20 +1,53 @@
-//! The mackey GUI: a GTK4 wizard/status window.
+//! The mackey GUI: a GTK4 wizard window.
 //!
-//! M9 (in progress): the setup-state detection layer is in place and unit
-//! tested. The GTK4 wizard window is built on top of it next, once the GTK
-//! development libraries are available. For now the binary prints the detected
-//! setup state so the layer is exercised end to end.
+//! M9: a single libadwaita window with no tray and no background process. On
+//! launch it detects whether the daemon is running and the GNOME extension is
+//! enabled; if either is missing it shows the setup wizard (copyable commands,
+//! never run on the user's behalf), otherwise a placeholder ready screen. It
+//! re-checks every 5 seconds so the view follows the real state.
 
 mod setup;
+mod ui;
+mod view;
+
+use std::time::Duration;
+
+use gtk::glib;
+use gtk::prelude::*;
 
 use setup::{detect, SystemRunner};
+use ui::WizardUi;
 
-fn main() {
-    let state = detect(&SystemRunner);
-    let phase = if state.is_complete() {
-        "set up"
-    } else {
-        "wizard"
-    };
-    println!("mackey GUI v{} — {phase} ({state:?})", mackey_core::VERSION);
+const APP_ID: &str = "app.mackey.Setup";
+const POLL: Duration = Duration::from_secs(5);
+
+fn main() -> glib::ExitCode {
+    let app = adw::Application::builder().application_id(APP_ID).build();
+    app.connect_activate(build_ui);
+    app.run()
+}
+
+fn build_ui(app: &adw::Application) {
+    let wizard = WizardUi::new();
+    wizard.update(detect(&SystemRunner));
+
+    // Re-poll every 5s so the wizard tracks the live setup state.
+    let poll_ui = wizard.clone();
+    glib::timeout_add_local(POLL, move || {
+        poll_ui.update(detect(&SystemRunner));
+        glib::ControlFlow::Continue
+    });
+
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.append(&adw::HeaderBar::new());
+    content.append(wizard.widget());
+
+    adw::ApplicationWindow::builder()
+        .application(app)
+        .title("mackey")
+        .default_width(560)
+        .default_height(480)
+        .content(&content)
+        .build()
+        .present();
 }

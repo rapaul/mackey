@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=mackey
+Comment=Set up macOS-style keyboard shortcuts
+Exec=mackey
+Icon=input-keyboard
+Terminal=false
+Categories=Utility;Settings;
+Keywords=keyboard;shortcuts;macos;remap;

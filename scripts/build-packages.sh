@@ -9,8 +9,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-echo "== building release binary =="
-cargo build --release -p mackeyd
+echo "== building release binaries (daemon + GUI) =="
+cargo build --release -p mackeyd -p mackey-gui
 
 echo "== gnome extension =="
 ext_out="target/gnome-extension"
