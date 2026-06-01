@@ -39,6 +39,22 @@ run_keymap_test() {
     local b64; b64="$(base64 -w0 scripts/m8_keymap_test.py)"
     r "echo $b64 | base64 -d >/tmp/m8.py && sudo python3 /tmp/m8.py $1" 2>&1 || true
 }
+# Restart gdm and wait for tester's autologin session (user bus + gnome-shell)
+# so the freshly-installed system-wide extension is discovered by the shell. A
+# mid-session install isn't picked up by the running Wayland shell otherwise.
+restart_session() {
+    r 'sudo systemctl restart gdm' >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+        [ "$(r "test -S /run/user/$uid/bus && pgrep -u tester -x gnome-shell >/dev/null && echo up || echo no" | tr -d '[:space:]')" = up ] \
+            && { sleep 3; return 0; }
+        sleep 2
+    done
+    return 1
+}
+# gnome-extensions must query tester's graphical session bus, not ssh's env.
+gnome_ext_lists_mackey() {
+    r "XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus gnome-extensions list 2>/dev/null | grep -q mackey@mackey.app && echo yes || echo no"
+}
 
 echo "== [$distro] clean snapshot =="
 "$vmtest" "$distro" snapshot reset
@@ -49,6 +65,7 @@ echo "== [$distro] install + start + python3-evdev =="
 groups_after="$(r 'id -nG tester')"
 r 'sudo systemctl enable --now mackey.service' >/dev/null
 r "$install_evdev" >/dev/null 2>&1
+uid="$(r 'id -u tester' | tr -d '[:space:]')"
 sleep 1
 
 echo "== [$distro] login user's groups unchanged by install =="
@@ -56,8 +73,9 @@ check "id -nG tester identical" "$groups_before" "$groups_after"
 
 echo "== [$distro] the GNOME extension is installed system-wide by the package =="
 check "extension metadata present" "$(r "test -f '$ext_dir/metadata.json' && echo yes || echo no")" "yes"
-check "extension listed by gnome-extensions" \
-    "$(r "gnome-extensions list 2>/dev/null | grep -q mackey@mackey.app && echo yes || echo no")" "yes"
+echo "== [$distro] restart gdm so the running shell discovers the extension =="
+restart_session || note "WARN: tester session did not return after gdm restart"
+check "extension listed by gnome-extensions" "$(gnome_ext_lists_mackey)" "yes"
 
 echo "== [$distro] UpdateFocus switches the active keymap (logged) =="
 set_focus firefox.desktop
