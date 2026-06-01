@@ -67,13 +67,18 @@ impl FocusTracker {
         let now_ms = self.start.elapsed().as_millis() as u64;
         let mut state = self.focus.lock().unwrap();
         let prev = state.active_keymap(now_ms).id;
+        let focus_changed = state.app_id() != Some(app_id.as_str());
         state.update(app_id.clone(), now_ms);
         let active = state.active_keymap(now_ms).id;
         drop(state);
+        // Heartbeats re-send the same app id every couple of seconds; only log
+        // when the focused app actually changes, not on each heartbeat.
+        if focus_changed {
+            eprintln!("accepted UpdateFocus app_id={app_id}");
+        }
         if active != prev {
             eprintln!("keymap → {active}");
         }
-        eprintln!("accepted UpdateFocus app_id={app_id}");
     }
 }
 
