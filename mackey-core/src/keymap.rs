@@ -14,16 +14,21 @@
 //!   macOS `super+` bindings rewritten to the Linux bindings): Super+{C,V,A,F,N,
 //!   T,W,Q} -> Ctrl+Shift+{same}; Super+{,/=/-/0/Enter} -> Ctrl+{same};
 //!   Super+{1..9} -> Alt+{same} (tab navigation); Super+Shift+{,/Enter/P} ->
-//!   Ctrl+Shift+{same}; and the splits Super+D -> Ctrl+Shift+O, Super+Shift+D ->
-//!   Ctrl+Shift+E (the only bindings that remap the key itself).
+//!   Ctrl+Shift+{same}; the new splits Super+D -> Ctrl+Shift+O and Super+Shift+D
+//!   -> Ctrl+Shift+E; and split navigation Super+[ / ] -> Super+Ctrl+[ / ],
+//!   Super+Alt+Arrow -> Ctrl+Alt+Arrow (goto), Super+Ctrl+Arrow ->
+//!   Super+Ctrl+Shift+Arrow (resize).
 //!
 //! A binding may therefore differ from the global "same key" rule in two ways: it
-//! can require **Shift** as part of the input trigger (so one key carries two
-//! bindings), and it can emit a **different output key** than the input. In every
-//! keymap, anything not in the active table passes through untouched: a key with
-//! Super *not* held, a lone Super tap (emitted on release so GNOME's Activities
-//! still opens), and Super(+Shift) + any *unmapped* key (the real Super, plus
-//! Shift if held, is emitted so e.g. Super+L still reaches the desktop).
+//! can require extra **input modifiers** (Shift/Ctrl/Alt) as part of the trigger —
+//! so one key carries several bindings (Cmd+D vs Cmd+Shift+D; Cmd+Alt+Up vs
+//! Cmd+Ctrl+Up) — and it can emit a **different output key** than the input. Input
+//! modifiers are matched on what's physically held, so press order is irrelevant
+//! (Shift-then-Cmd resolves the same as Cmd-then-Shift). In every keymap, anything
+//! not in the active table passes through untouched: a key with Super *not* held,
+//! a lone Super tap (emitted on release so GNOME's Activities still opens), and
+//! Super(+mods) + any *unmapped* key (the real Super, plus any held modifiers, is
+//! emitted so e.g. Super+L still reaches the desktop).
 //!
 //! The engine is a pure state machine over `(code, value)` key events plus an
 //! active [`Keymap`], so it can be exhaustively unit-tested without a kernel.
@@ -33,9 +38,11 @@ use evdev::KeyCode;
 const LEFTMETA: u16 = KeyCode::KEY_LEFTMETA.code();
 const RIGHTMETA: u16 = KeyCode::KEY_RIGHTMETA.code();
 const LEFTCTRL: u16 = KeyCode::KEY_LEFTCTRL.code();
+const RIGHTCTRL: u16 = KeyCode::KEY_RIGHTCTRL.code();
 const LEFTSHIFT: u16 = KeyCode::KEY_LEFTSHIFT.code();
 const RIGHTSHIFT: u16 = KeyCode::KEY_RIGHTSHIFT.code();
 const LEFTALT: u16 = KeyCode::KEY_LEFTALT.code();
+const RIGHTALT: u16 = KeyCode::KEY_RIGHTALT.code();
 
 // Input key codes used by the built-in tables.
 const KEY_C: u16 = KeyCode::KEY_C.code();
@@ -56,6 +63,9 @@ const KEY_P: u16 = KeyCode::KEY_P.code();
 const KEY_LEFT: u16 = KeyCode::KEY_LEFT.code();
 const KEY_RIGHT: u16 = KeyCode::KEY_RIGHT.code();
 const KEY_UP: u16 = KeyCode::KEY_UP.code();
+const KEY_DOWN: u16 = KeyCode::KEY_DOWN.code();
+const KEY_LEFTBRACE: u16 = KeyCode::KEY_LEFTBRACE.code();
+const KEY_RIGHTBRACE: u16 = KeyCode::KEY_RIGHTBRACE.code();
 
 // Ghostty-specific keys (font size, config, fullscreen, tab navigation).
 const KEY_COMMA: u16 = KeyCode::KEY_COMMA.code();
@@ -73,33 +83,122 @@ const KEY_7: u16 = KeyCode::KEY_7.code();
 const KEY_8: u16 = KeyCode::KEY_8.code();
 const KEY_9: u16 = KeyCode::KEY_9.code();
 
-// Modifier sets a binding can request, held while the mapped key is emitted.
+// Output modifier sets a binding can request, held while the mapped key is
+// emitted. (Super-bearing sets are for Ghostty's split navigation, whose Linux
+// bindings keep Super: e.g. goto_split is super+ctrl+[.)
 const CTRL: &[u16] = &[LEFTCTRL];
 const CTRL_SHIFT: &[u16] = &[LEFTCTRL, LEFTSHIFT];
 const ALT: &[u16] = &[LEFTALT];
+const CTRL_ALT: &[u16] = &[LEFTCTRL, LEFTALT];
+const SUPER_CTRL: &[u16] = &[LEFTMETA, LEFTCTRL];
+const SUPER_CTRL_SHIFT: &[u16] = &[LEFTMETA, LEFTCTRL, LEFTSHIFT];
 
 // evdev key event values.
 const RELEASE: i32 = 0;
 const PRESS: i32 = 1;
 
-/// One rewrite rule. While Super is held, pressing `in_key` — with Shift also
-/// held iff `shift` — is emitted as `out_mods` + `out_key` instead of Super +
-/// `in_key`. `out_key` may differ from `in_key` (e.g. Ghostty's Cmd+D split maps
-/// to Ctrl+Shift+O), and `shift` lets one input key carry two bindings (Cmd+D vs
-/// Cmd+Shift+D).
+/// The non-Super modifiers that can take part in a shortcut, tracked as a set so
+/// a binding's trigger and the engine's live state can be compared directly.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct InputMods {
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
+}
+
+/// One modifier class. Left/right variants of a physical modifier collapse to the
+/// same class; `idx` indexes the engine's per-class arrays.
+#[derive(Clone, Copy)]
+enum Mod {
+    Shift,
+    Ctrl,
+    Alt,
+}
+
+impl Mod {
+    fn idx(self) -> usize {
+        match self {
+            Mod::Shift => 0,
+            Mod::Ctrl => 1,
+            Mod::Alt => 2,
+        }
+    }
+}
+
+impl InputMods {
+    fn get(self, m: Mod) -> bool {
+        match m {
+            Mod::Shift => self.shift,
+            Mod::Ctrl => self.ctrl,
+            Mod::Alt => self.alt,
+        }
+    }
+
+    fn set(&mut self, m: Mod, v: bool) {
+        match m {
+            Mod::Shift => self.shift = v,
+            Mod::Ctrl => self.ctrl = v,
+            Mod::Alt => self.alt = v,
+        }
+    }
+
+    fn any(self) -> bool {
+        self.shift || self.ctrl || self.alt
+    }
+}
+
+const NO_MODS: InputMods = InputMods {
+    shift: false,
+    ctrl: false,
+    alt: false,
+};
+const SHIFT_IN: InputMods = InputMods {
+    shift: true,
+    ctrl: false,
+    alt: false,
+};
+const CTRL_IN: InputMods = InputMods {
+    shift: false,
+    ctrl: true,
+    alt: false,
+};
+const ALT_IN: InputMods = InputMods {
+    shift: false,
+    ctrl: false,
+    alt: true,
+};
+
+/// Which modifier class a key code belongs to (collapsing left/right), if any.
+fn mod_class(code: u16) -> Option<Mod> {
+    if code == LEFTSHIFT || code == RIGHTSHIFT {
+        Some(Mod::Shift)
+    } else if code == LEFTCTRL || code == RIGHTCTRL {
+        Some(Mod::Ctrl)
+    } else if code == LEFTALT || code == RIGHTALT {
+        Some(Mod::Alt)
+    } else {
+        None
+    }
+}
+
+/// One rewrite rule. While Super is held, pressing `in_key` together with exactly
+/// the modifiers in `in_mods` is emitted as `out_mods` + `out_key` instead. Both
+/// halves are general: `out_key` may differ from `in_key` (Ghostty's Cmd+D split
+/// -> Ctrl+Shift+O), and `in_mods` lets one input key carry several bindings
+/// (Cmd+D vs Cmd+Shift+D; Cmd+Alt+Up vs Cmd+Ctrl+Up).
 #[derive(Clone, Copy)]
 struct Binding {
     in_key: u16,
-    shift: bool,
+    in_mods: InputMods,
     out_mods: &'static [u16],
     out_key: u16,
 }
 
-/// The common rule: same key, no Shift in the trigger (Super+X -> mods+X).
+/// The common rule: same key, no extra input modifier (Super+X -> mods+X).
 const fn key(in_key: u16, out_mods: &'static [u16]) -> Binding {
     Binding {
         in_key,
-        shift: false,
+        in_mods: NO_MODS,
         out_mods,
         out_key: in_key,
     }
@@ -115,12 +214,12 @@ pub struct Keymap {
 }
 
 impl Keymap {
-    /// The binding for `code` given whether Shift is also held, if any.
-    fn binding_for(&self, code: u16, shift: bool) -> Option<Binding> {
+    /// The binding for `code` given exactly the input modifiers held, if any.
+    fn binding_for(&self, code: u16, mods: InputMods) -> Option<Binding> {
         self.bindings
             .iter()
             .copied()
-            .find(|b| b.in_key == code && b.shift == shift)
+            .find(|b| b.in_key == code && b.in_mods == mods)
     }
 }
 
@@ -214,12 +313,14 @@ const TERMINAL_ENTRIES: &[Binding] = &[
 //   super+shift+enter -> ctrl+shift+enter            (toggle_split_zoom)
 //   super+shift+p     -> ctrl+shift+p                (toggle_command_palette)
 //   super+d -> ctrl+shift+o, super+shift+d -> ctrl+shift+e   (new_split right/down)
+//   super+[ / super+] -> super+ctrl+[ / ]            (goto_split prev/next)
+//   super+alt+arrow   -> ctrl+alt+arrow              (goto_split directional)
+//   super+ctrl+arrow  -> super+ctrl+shift+arrow      (resize_split)
 //
 // Ghostty binds no super shortcut to S/Z/X/O on macOS, so those are absent here
 // (they pass the real Super through rather than injecting Ctrl+S/Z into the
-// shell). Bindings whose macOS trigger carries Alt or Ctrl as an input modifier
-// (alt+super+i inspector, super+ctrl arrows for goto/resize split) aren't
-// expressible by the engine and are omitted.
+// shell). The macOS-only natural-text-editing binds (super+arrow, super+
+// backspace) and alt+super+i (inspector) have no Linux default and are omitted.
 const GHOSTTY_ENTRIES: &[Binding] = &[
     key(KEY_C, CTRL_SHIFT),
     key(KEY_V, CTRL_SHIFT),
@@ -243,38 +344,101 @@ const GHOSTTY_ENTRIES: &[Binding] = &[
     key(KEY_7, ALT),
     key(KEY_8, ALT),
     key(KEY_9, ALT),
-    // Splits: Cmd+D opens a right split, Cmd+Shift+D a down split. Ghostty's
+    // New split: Cmd+D opens a right split, Cmd+Shift+D a down split. Ghostty's
     // Linux defaults bind these to Ctrl+Shift+O / Ctrl+Shift+E (different keys).
     Binding {
         in_key: KEY_D,
-        shift: false,
+        in_mods: NO_MODS,
         out_mods: CTRL_SHIFT,
         out_key: KEY_O,
     },
     Binding {
         in_key: KEY_D,
-        shift: true,
+        in_mods: SHIFT_IN,
         out_mods: CTRL_SHIFT,
         out_key: KEY_E,
     },
     // Same-key Super+Shift bindings: reload_config, zoom split, command palette.
     Binding {
         in_key: KEY_COMMA,
-        shift: true,
+        in_mods: SHIFT_IN,
         out_mods: CTRL_SHIFT,
         out_key: KEY_COMMA,
     },
     Binding {
         in_key: KEY_ENTER,
-        shift: true,
+        in_mods: SHIFT_IN,
         out_mods: CTRL_SHIFT,
         out_key: KEY_ENTER,
     },
     Binding {
         in_key: KEY_P,
-        shift: true,
+        in_mods: SHIFT_IN,
         out_mods: CTRL_SHIFT,
         out_key: KEY_P,
+    },
+    // goto_split: Cmd+[ / Cmd+] cycle splits (Linux super+ctrl+[ / ]);
+    // Cmd+Alt+Arrow move directionally (Linux ctrl+alt+arrow).
+    Binding {
+        in_key: KEY_LEFTBRACE,
+        in_mods: NO_MODS,
+        out_mods: SUPER_CTRL,
+        out_key: KEY_LEFTBRACE,
+    },
+    Binding {
+        in_key: KEY_RIGHTBRACE,
+        in_mods: NO_MODS,
+        out_mods: SUPER_CTRL,
+        out_key: KEY_RIGHTBRACE,
+    },
+    Binding {
+        in_key: KEY_UP,
+        in_mods: ALT_IN,
+        out_mods: CTRL_ALT,
+        out_key: KEY_UP,
+    },
+    Binding {
+        in_key: KEY_DOWN,
+        in_mods: ALT_IN,
+        out_mods: CTRL_ALT,
+        out_key: KEY_DOWN,
+    },
+    Binding {
+        in_key: KEY_LEFT,
+        in_mods: ALT_IN,
+        out_mods: CTRL_ALT,
+        out_key: KEY_LEFT,
+    },
+    Binding {
+        in_key: KEY_RIGHT,
+        in_mods: ALT_IN,
+        out_mods: CTRL_ALT,
+        out_key: KEY_RIGHT,
+    },
+    // resize_split: Cmd+Ctrl+Arrow (Linux super+ctrl+shift+arrow).
+    Binding {
+        in_key: KEY_UP,
+        in_mods: CTRL_IN,
+        out_mods: SUPER_CTRL_SHIFT,
+        out_key: KEY_UP,
+    },
+    Binding {
+        in_key: KEY_DOWN,
+        in_mods: CTRL_IN,
+        out_mods: SUPER_CTRL_SHIFT,
+        out_key: KEY_DOWN,
+    },
+    Binding {
+        in_key: KEY_LEFT,
+        in_mods: CTRL_IN,
+        out_mods: SUPER_CTRL_SHIFT,
+        out_key: KEY_LEFT,
+    },
+    Binding {
+        in_key: KEY_RIGHT,
+        in_mods: CTRL_IN,
+        out_mods: SUPER_CTRL_SHIFT,
+        out_key: KEY_RIGHT,
     },
 ];
 
@@ -303,10 +467,6 @@ fn is_meta(code: u16) -> bool {
     code == LEFTMETA || code == RIGHTMETA
 }
 
-fn is_shift(code: u16) -> bool {
-    code == LEFTSHIFT || code == RIGHTSHIFT
-}
-
 /// A single key event: an EV_KEY `code` with a `value` (0=release, 1=press,
 /// 2=autorepeat).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -328,22 +488,27 @@ pub struct KeymapEngine {
     super_down: bool,
     /// Which Meta keycode is currently held (to release the right one).
     meta_code: u16,
-    /// The user is physically holding Shift within the current Super-hold. The
-    /// press is deferred: it becomes part of a binding's trigger (Cmd+Shift+D) or
-    /// is passed through with the real Super for an unmapped combo.
-    shift_down: bool,
-    /// Which physical Shift keycode is held (to pass the right one through).
-    shift_code: u16,
-    /// Synthetic modifiers we've pressed for the current Super-hold, in press
-    /// order; released (in reverse) when Super is released.
+    /// Which Shift/Ctrl/Alt modifiers are physically held, tracked at all times.
+    /// Binding lookup keys on this set, so the press order of Super and the other
+    /// modifiers doesn't matter (Shift-then-Cmd resolves the same as Cmd-then-Shift).
+    phys: InputMods,
+    /// The physical keycode last seen for each class (to emit/release the exact
+    /// left/right variant the user pressed). Indexed by [`Mod::idx`].
+    phys_code: [u16; 3],
+    /// Modifiers pressed *during* a Super-hold whose press we deferred (did not
+    /// emit). They drive binding lookup but stay invisible unless an unmapped
+    /// combo forces them through. (Modifiers pressed before Super were emitted
+    /// already, so they aren't suppressed — the binding's `out_mods` re-asserts
+    /// them harmlessly.)
+    suppressed: InputMods,
+    /// Synthetic output modifiers we've pressed for the current Super-hold, in
+    /// press order; released (in reverse) when Super is released.
     held_mods: Vec<u16>,
     /// We passed the real Super through for an unmapped combo and owe its release.
     emitted_super: bool,
-    /// We passed the real Shift through (unmapped path) and owe its release.
-    emitted_shift: bool,
     /// Remapped keys currently held, as `(in_key, out_key)`, so a key's release
-    /// and autorepeat emit the same output key the press chose — even if Super or
-    /// Shift was released first (which can change what a fresh lookup would pick).
+    /// and autorepeat emit the same output key the press chose — even if a
+    /// modifier was released first (which can change what a fresh lookup picks).
     active: Vec<(u16, u16)>,
 }
 
@@ -352,11 +517,11 @@ impl Default for KeymapEngine {
         Self {
             super_down: false,
             meta_code: LEFTMETA,
-            shift_down: false,
-            shift_code: LEFTSHIFT,
+            phys: InputMods::default(),
+            phys_code: [LEFTSHIFT, LEFTCTRL, LEFTALT],
+            suppressed: InputMods::default(),
             held_mods: Vec::new(),
             emitted_super: false,
-            emitted_shift: false,
             active: Vec::new(),
         }
     }
@@ -372,14 +537,14 @@ impl KeymapEngine {
         if is_meta(code) {
             return self.process_meta(code, value);
         }
-        if is_shift(code) {
-            return self.process_shift(code, value);
+        if let Some(m) = mod_class(code) {
+            return self.process_mod(m, code, value);
         }
         if value == PRESS {
             if !self.super_down {
                 return vec![KeyEvent::new(code, value)];
             }
-            return match keymap.binding_for(code, self.shift_down) {
+            return match keymap.binding_for(code, self.phys) {
                 Some(b) => self.emit_mapped(code, b),
                 None => self.emit_unmapped(code),
             };
@@ -403,9 +568,9 @@ impl KeymapEngine {
         Some(out_key)
     }
 
-    /// Super(+Shift)+mapped -> `out_mods`+`out_key`. Reconcile the held modifier
-    /// set to `out_mods` (so a second key wanting different mods is correct), then
-    /// emit the output key and record the remap for release/autorepeat.
+    /// Super+mapped -> `out_mods`+`out_key`. Reconcile the held modifier set to
+    /// `out_mods` (so a second key wanting different mods is correct), then emit
+    /// the output key and record the remap for release/autorepeat.
     fn emit_mapped(&mut self, code: u16, b: Binding) -> Vec<KeyEvent> {
         let mut out = Vec::new();
         let mut i = 0;
@@ -430,56 +595,54 @@ impl KeymapEngine {
         out
     }
 
-    /// Super(+Shift)+unmapped -> pass the real Super (and Shift) through so the
-    /// combo still reaches the desktop.
+    /// Super(+mods)+unmapped -> pass the real Super, plus any modifiers whose
+    /// press we deferred, through so the combo still reaches the desktop.
     fn emit_unmapped(&mut self, code: u16) -> Vec<KeyEvent> {
         let mut out = Vec::new();
         if !self.emitted_super {
             out.push(KeyEvent::new(self.meta_code, PRESS));
             self.emitted_super = true;
         }
-        if self.shift_down && !self.emitted_shift {
-            out.push(KeyEvent::new(self.shift_code, PRESS));
-            self.emitted_shift = true;
+        for m in [Mod::Shift, Mod::Ctrl, Mod::Alt] {
+            if self.phys.get(m) && self.suppressed.get(m) {
+                out.push(KeyEvent::new(self.phys_code[m.idx()], PRESS));
+                self.suppressed.set(m, false);
+            }
         }
         out.push(KeyEvent::new(code, PRESS));
         out
     }
 
-    /// Shift is a deferred input modifier while Super is held: we don't emit it
-    /// until we know whether it belongs to a binding (consumed) or an unmapped
-    /// passthrough (emitted). Outside a Super-hold it passes through normally.
-    fn process_shift(&mut self, code: u16, value: i32) -> Vec<KeyEvent> {
+    /// Shift/Ctrl/Alt handling. We always track the physical state. While Super is
+    /// held, a fresh press is deferred (suppressed) so it shapes the binding
+    /// lookup without leaking — unless an unmapped combo already forced the real
+    /// Super through, in which case we pass the modifier too.
+    fn process_mod(&mut self, m: Mod, code: u16, value: i32) -> Vec<KeyEvent> {
         match value {
             PRESS => {
-                if !self.super_down {
-                    return vec![KeyEvent::new(code, value)];
-                }
-                self.shift_down = true;
-                self.shift_code = code;
-                // If a prior unmapped key already committed the passthrough path,
-                // pass Shift too rather than dropping it.
-                if self.emitted_super && !self.emitted_shift {
-                    self.emitted_shift = true;
-                    return vec![KeyEvent::new(code, PRESS)];
-                }
-                Vec::new()
-            }
-            RELEASE => {
-                if self.shift_down {
-                    self.shift_down = false;
-                    if self.emitted_shift {
-                        self.emitted_shift = false;
-                        return vec![KeyEvent::new(self.shift_code, RELEASE)];
+                self.phys.set(m, true);
+                self.phys_code[m.idx()] = code;
+                if self.super_down {
+                    if self.emitted_super {
+                        return vec![KeyEvent::new(code, PRESS)];
                     }
-                    // Deferred or consumed by a binding: swallow the release.
+                    self.suppressed.set(m, true);
                     return Vec::new();
                 }
-                vec![KeyEvent::new(code, value)]
+                vec![KeyEvent::new(code, PRESS)]
+            }
+            RELEASE => {
+                self.phys.set(m, false);
+                if self.suppressed.get(m) {
+                    // The deferred press was never emitted: swallow the release.
+                    self.suppressed.set(m, false);
+                    return Vec::new();
+                }
+                vec![KeyEvent::new(code, RELEASE)]
             }
             // Autorepeat: swallow while the press is still deferred, else pass on.
             _ => {
-                if self.super_down && self.shift_down && !self.emitted_shift {
+                if self.super_down && self.suppressed.get(m) {
                     Vec::new()
                 } else {
                     vec![KeyEvent::new(code, value)]
@@ -507,10 +670,10 @@ impl KeymapEngine {
                 self.held_mods.clear();
                 if self.emitted_super {
                     out.push(KeyEvent::new(self.meta_code, RELEASE));
-                } else if !had_mods && !self.shift_down {
+                } else if !had_mods && !self.phys.any() {
                     // Nothing followed: emit the deferred tap so Super-alone works.
-                    // (Suppressed when Shift is also held — Super+Shift alone is a
-                    // no-op, and the Shift release is swallowed separately.)
+                    // (Suppressed when another modifier is held — Super+mod alone is
+                    // a no-op, and that modifier's release is swallowed separately.)
                     out.push(KeyEvent::new(self.meta_code, PRESS));
                     out.push(KeyEvent::new(self.meta_code, RELEASE));
                 }
@@ -813,11 +976,13 @@ mod tests {
     #[test]
     fn ghostty_and_gnome_terminal_differ_on_quit() {
         assert_eq!(
-            GHOSTTY.binding_for(KEY_Q, false).map(|b| b.out_mods),
+            GHOSTTY.binding_for(KEY_Q, NO_MODS).map(|b| b.out_mods),
             Some(CTRL_SHIFT)
         );
         assert_eq!(
-            GNOME_TERMINAL.binding_for(KEY_Q, false).map(|b| b.out_mods),
+            GNOME_TERMINAL
+                .binding_for(KEY_Q, NO_MODS)
+                .map(|b| b.out_mods),
             Some(CTRL)
         );
     }
@@ -957,6 +1122,135 @@ mod tests {
                 KeyEvent::new(LEFTMETA, 0),
             ]
         );
+    }
+
+    /// Pressing Shift *before* Super still selects the shifted binding: Cmd+Shift+D
+    /// is the down split regardless of modifier order. (The physical Shift leaks
+    /// through, but the binding's Ctrl+Shift output re-asserts it, so E fires with
+    /// Ctrl+Shift held — and never an O.)
+    #[test]
+    fn ghostty_shift_before_super_selects_down_split() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GHOSTTY,
+            &[
+                (LEFTSHIFT, 1), // Shift first
+                (LEFTMETA, 1),
+                (KEY_D, 1),
+                (KEY_D, 0),
+                (LEFTMETA, 0),
+                (LEFTSHIFT, 0),
+            ],
+        );
+        assert!(out.contains(&KeyEvent::new(KEY_E, 1)));
+        assert!(out.contains(&KeyEvent::new(KEY_E, 0)));
+        assert!(out.contains(&KeyEvent::new(LEFTCTRL, 1)));
+        assert!(!out.iter().any(|ev| ev.code == KEY_O));
+    }
+
+    /// goto_split prev: Cmd+[ -> Super+Ctrl+[ (output keeps Super; same key).
+    #[test]
+    fn ghostty_goto_split_bracket_keeps_super() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GHOSTTY,
+            &[
+                (LEFTMETA, 1),
+                (KEY_LEFTBRACE, 1),
+                (KEY_LEFTBRACE, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTMETA, 1),
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(KEY_LEFTBRACE, 1),
+                KeyEvent::new(KEY_LEFTBRACE, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+                KeyEvent::new(LEFTMETA, 0),
+            ]
+        );
+    }
+
+    /// goto_split directional: Cmd+Alt+Up -> Ctrl+Alt+Up. Alt is an input modifier
+    /// that selects the binding and is replaced by the output set.
+    #[test]
+    fn ghostty_goto_split_alt_arrow_becomes_ctrl_alt() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GHOSTTY,
+            &[
+                (LEFTMETA, 1),
+                (LEFTALT, 1),
+                (KEY_UP, 1),
+                (KEY_UP, 0),
+                (LEFTALT, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTALT, 1),
+                KeyEvent::new(KEY_UP, 1),
+                KeyEvent::new(KEY_UP, 0),
+                KeyEvent::new(LEFTALT, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// resize_split: Cmd+Ctrl+Up -> Super+Ctrl+Shift+Up. Ctrl is an input modifier;
+    /// the output keeps Super+Ctrl and adds Shift.
+    #[test]
+    fn ghostty_resize_split_ctrl_arrow_adds_shift() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GHOSTTY,
+            &[
+                (LEFTMETA, 1),
+                (LEFTCTRL, 1),
+                (KEY_UP, 1),
+                (KEY_UP, 0),
+                (LEFTCTRL, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTMETA, 1),
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTSHIFT, 1),
+                KeyEvent::new(KEY_UP, 1),
+                KeyEvent::new(KEY_UP, 0),
+                KeyEvent::new(LEFTSHIFT, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+                KeyEvent::new(LEFTMETA, 0),
+            ]
+        );
+    }
+
+    /// Up arrow carries two Ghostty bindings keyed on the input modifier: Alt ->
+    /// goto_split (Ctrl+Alt), Ctrl -> resize_split (Super+Ctrl+Shift).
+    #[test]
+    fn ghostty_arrow_binding_depends_on_input_modifier() {
+        assert_eq!(
+            GHOSTTY.binding_for(KEY_UP, ALT_IN).map(|b| b.out_mods),
+            Some(CTRL_ALT)
+        );
+        assert_eq!(
+            GHOSTTY.binding_for(KEY_UP, CTRL_IN).map(|b| b.out_mods),
+            Some(SUPER_CTRL_SHIFT)
+        );
+        assert!(GHOSTTY.binding_for(KEY_UP, NO_MODS).is_none());
     }
 
     #[test]
