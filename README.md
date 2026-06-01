@@ -94,3 +94,7 @@ All of the common shortcuts above, plus:
 | Press | Does |
 | --- | --- |
 | <kbd>⌘</kbd><kbd>↑</kbd> | Go to parent folder |
+
+## License
+
+[MIT](LICENSE)
