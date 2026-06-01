@@ -1330,4 +1330,30 @@ mod tests {
         s.update("com.mitchellh.ghostty.desktop".to_string(), 20_000);
         assert_eq!(s.active_keymap(20_100).id, "com.mitchellh.ghostty.desktop");
     }
+
+    #[test]
+    fn heartbeat_keeps_one_window_authoritative_past_the_stale_window() {
+        // Regression: dwelling in a single window must not revert to global.
+        // The extension re-sends the focused app every 2s, kept below STALE_MS
+        // (5s) so heartbeats always land inside the window and focus never
+        // goes stale while a window stays focused.
+        const HEARTBEAT_MS: u64 = 2_000;
+
+        let mut s = FocusState::new();
+        // Focus Firefox once, then heartbeat the same app every 2s out to 30s —
+        // six times past the 5s window the bug used to trip.
+        let mut t = 1_000;
+        s.update("firefox.desktop".to_string(), t);
+        for _ in 0..15 {
+            t += HEARTBEAT_MS;
+            s.update("firefox.desktop".to_string(), t);
+            assert!(!s.is_stale(t), "heartbeat at t={t} should keep focus fresh");
+            assert_eq!(s.active_keymap(t).id, "firefox.desktop");
+        }
+        assert!(t > 1_000 + STALE_MS);
+
+        // Drop the heartbeat: once the gap exceeds the window, it reverts.
+        assert_eq!(s.active_keymap(t + STALE_MS).id, "firefox.desktop");
+        assert_eq!(s.active_keymap(t + STALE_MS + 1).id, "global");
+    }
 }
