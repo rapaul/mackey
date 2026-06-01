@@ -39,8 +39,8 @@ groups_before="$(r 'id -nG tester')"
 echo "== [$distro] post-install state =="
 check "mackey user exists"   "$(r 'id -u mackey >/dev/null 2>&1 && echo yes || echo no')" "yes"
 check "mackey group exists"  "$(r 'getent group mackey >/dev/null 2>&1 && echo yes || echo no')" "yes"
-check "service NOT enabled"  "$(r 'systemctl is-enabled mackey.service 2>/dev/null || true')" "disabled"
-check "service NOT running"  "$(r 'systemctl is-active mackey.service 2>/dev/null || true')" "inactive"
+check "service enabled"      "$(r 'systemctl is-enabled mackey.service 2>/dev/null || true')" "enabled"
+check "service running"      "$(r 'systemctl is-active mackey.service 2>/dev/null || true')" "active"
 check "tester groups unchanged" "$(r 'id -nG tester')" "$groups_before"
 
 echo "== [$distro] post-install scriptlet is idempotent (run it twice) =="
@@ -49,9 +49,7 @@ check "postinst idempotent" \
     "$(r "echo $b64 | base64 -d >/tmp/pi.sh && sudo sh /tmp/pi.sh && sudo sh /tmp/pi.sh && echo OK")" \
     "OK"
 
-echo "== [$distro] enable --now: active, running as mackey =="
-r 'sudo systemctl enable --now mackey.service' >/dev/null
-check "service active"        "$(r 'systemctl is-active mackey.service 2>/dev/null || true')" "active"
+echo "== [$distro] daemon runs as the mackey user =="
 check "runs as mackey user"   "$(r 'ps -o user= -p "$(pidof mackeyd)" | tr -d " "')" "mackey"
 
 echo "== [$distro] stop completes within 2s =="

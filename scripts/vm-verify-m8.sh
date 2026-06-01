@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# M8 VM verification: the package ships an installable GNOME extension bundle,
+# M8 VM verification: the package installs the GNOME extension system-wide,
 # UpdateFocus switches the active keymap (logged), Super+T is rewritten per the
 # focused app's keymap (Ctrl+Shift+T in Ghostty vs plain Ctrl+T in Firefox), and
 # the keymap reverts to global with a warning after >5s of focus silence. The
@@ -28,7 +28,7 @@ esac
 
 dest=app.mackey.FocusTracker
 path=/app/mackey/FocusTracker
-zip=/usr/share/mackey/gnome-extension/mackey@mackey.app.shell-extension.zip
+ext_dir=/usr/share/gnome-shell/extensions/mackey@mackey.app
 fail=0
 note() { printf '  %s\n' "$*"; }
 check() { if [ "$2" = "$3" ]; then note "PASS: $1 ($2)"; else note "FAIL: $1 — got [$2], want [$3]"; fail=1; fi; }
@@ -54,10 +54,10 @@ sleep 1
 echo "== [$distro] login user's groups unchanged by install =="
 check "id -nG tester identical" "$groups_before" "$groups_after"
 
-echo "== [$distro] the GNOME extension bundle ships and installs =="
-check "extension zip present" "$(r "test -f '$zip' && echo yes || echo no")" "yes"
-check "extension installs for the user" \
-    "$(r "gnome-extensions install --force '$zip' >/dev/null 2>&1 && gnome-extensions list | grep -q mackey@mackey.app && echo yes || echo no")" "yes"
+echo "== [$distro] the GNOME extension is installed system-wide by the package =="
+check "extension metadata present" "$(r "test -f '$ext_dir/metadata.json' && echo yes || echo no")" "yes"
+check "extension listed by gnome-extensions" \
+    "$(r "gnome-extensions list 2>/dev/null | grep -q mackey@mackey.app && echo yes || echo no")" "yes"
 
 echo "== [$distro] UpdateFocus switches the active keymap (logged) =="
 set_focus firefox.desktop

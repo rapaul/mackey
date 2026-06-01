@@ -39,30 +39,30 @@ sudo apt install ./mackey_0.1.0_amd64.deb
 The package places:
 - `/usr/bin/mackeyd` — the remapper daemon
 - `/usr/bin/mackey` — the GTK4 configuration app
-- `/usr/lib/systemd/system/mackey.service` — system service (not enabled yet); runs `mackeyd` as the dedicated `mackey` user with `Group=mackey` and no other supplementary groups
+- `/usr/lib/systemd/system/mackey.service` — system service (enabled and started by the post-install); runs `mackeyd` as the dedicated `mackey` user with `Group=mackey` and no other supplementary groups
 - `/usr/lib/udev/rules.d/90-mackey.rules` — sets `GROUP="mackey", MODE="0660"` on `/dev/uinput` and on `/dev/input/event*` nodes tagged `ENV{ID_INPUT_KEYBOARD}=="1"` (keyboards only — mice, touchpads, tablets, and gamepads are not exposed to the daemon). Effective immediately for newly attached devices and after `udevadm trigger` for existing ones; full effect on next boot.
 - `/usr/share/dbus-1/system.d/app.mackey.conf` — D-Bus system-bus policy permitting any logged-in user to call `app.mackey.FocusTracker.UpdateFocus` on the daemon
 - `/usr/share/polkit-1/actions/app.mackey.policy` — polkit action allowing the active local-seat user to `start` / `stop` `mackey.service` without a `sudo` prompt
-- `/usr/share/mackey/gnome-extension/` — the bundled GNOME Shell extension source
+- `/usr/share/gnome-shell/extensions/mackey@mackey.app/` — the GNOME Shell extension, installed system-wide so it's available to every user (each user still enables it themselves)
 - `/usr/share/applications/mackey.desktop` — launcher entry
 
-The post-install script creates the `mackey` system user and group (which own the daemon process and gate `/dev/input` access via the udev rule) and installs the files above. It does **not** enable the service, add any login user to any group, or touch GNOME settings — that's the wizard's job, with consent. **The invoking user's group memberships are never modified by mackey at any point.**
+The post-install script creates the `mackey` system user and group (which own the daemon process and gate `/dev/input` access via the udev rule), installs the files above — including the GNOME extension under the system-wide `/usr/share/gnome-shell/extensions/` so every user can enable it without a per-user install — and enables+starts `mackey.service` (it restarts the daemon on upgrade and stops+disables it on removal). Installing the package is itself a privileged, deliberate act, so it doubles as the consent gesture for running the daemon. The post-install still **never** adds any login user to any group, **never** enables the extension for a user (enabling is per-user GNOME state and stays the user's own action), and **never** touches GNOME settings. **The invoking user's group memberships are never modified by mackey at any point.**
 
 ### First run
 Launching `mackey` from the application menu shows a wizard:
 
 1. **Welcome** — one-paragraph explanation of what mackey does.
-2. **System setup** — two checklist items. mackey never runs these commands on the user's behalf; each item shows the exact command(s) the user should copy and run in a terminal, alongside a one-line explanation of what it does. While the wizard is open, the GUI polls for completion every 5 seconds and live-updates each item's status (pending → done) so the user gets immediate confirmation that what they ran worked.
-   - **Enable the systemd system service.** Detected via `systemctl is-active mackey.service`. Command shown:
+2. **System setup** — the package already enables+starts the daemon and installs the extension system-wide, so on a normal install the only action left for the user is enabling the extension. mackey never runs these commands on the user's behalf; each item shows the exact command(s) to copy and run in a terminal, alongside a one-line explanation. While the wizard is open, the GUI polls for completion every 5 seconds and live-updates each item's status (pending → done).
+   - **Start the mackey service.** Detected via `systemctl is-active mackey.service`. Normally already done — the package starts the daemon on install — so this shows as a pending item only if the service isn't running. Command shown:
      ```
      sudo systemctl enable --now mackey.service
      ```
-     This step is privileged because `mackeyd` runs as a system service under a dedicated `mackey` user — that isolation is what lets us grant the daemon `/dev/input` access via a udev-tagged group without ever adding the login user to `input` or any other privileged group.
-   - **Install the GNOME Shell extension.** Detected by polling `gnome-extensions list --enabled` for `mackey@mackey.app`. Because GNOME Wayland exposes no public window-focus API, **mackey refuses to apply app-specific keymaps until the extension is detected**. Command shown:
+     `mackeyd` runs as a system service under a dedicated `mackey` user; that isolation is what lets us grant the daemon `/dev/input` access via a udev-tagged group without ever adding the login user to `input` or any other privileged group.
+   - **Enable the GNOME Shell extension.** Detected by polling `gnome-extensions list --enabled` for `mackey@mackey.app`. Because GNOME Wayland exposes no public window-focus API, **mackey refuses to apply app-specific keymaps until the extension is detected**. The extension is already installed system-wide by the package, so the user only enables it (no `sudo`):
      ```
-     gnome-extensions install /usr/share/mackey/gnome-extension/mackey@mackey.app.shell-extension.zip
      gnome-extensions enable mackey@mackey.app
      ```
+     On Wayland, if the package was installed mid-session the running shell may not have discovered the extension yet; the user logs out and back in once, then runs the command.
 3. **Keyboard layout** — informs the user that mackey assumes a MacBook layout (Cmd in the position of the left Super/Win key). No prompt — assumed.
 4. **Done** — the user closes the window. The daemon keeps running under systemd; mackey has no background GUI process, no tray icon. To check on mackey later (pause it, resume it, see status), the user relaunches `mackey` from the application menu (or runs `mackey` in a terminal). On relaunch, if both system items are still satisfied, the wizard is skipped and the user lands directly on a status view (see GUI below); if either item has regressed, the wizard reappears for just that item.
 
@@ -100,7 +100,7 @@ Bindings are pure key-event → key-event mappings; there is no syntax for execu
 - No keymap editor — bindings are compiled in (see *Built-in keymaps*).
 
 ### GNOME Shell extension
-- Minimal JS extension shipped as a `.shell-extension.zip` inside the package.
+- Minimal JS extension, built and validated as a `.shell-extension.zip` then extracted and installed system-wide under `/usr/share/gnome-shell/extensions/mackey@mackey.app/` by the package.
 - On every focus change calls `app.mackey.FocusTracker.UpdateFocus(app_id, window_title)` on the **system D-Bus** (not the session bus — the daemon runs as the `mackey` system user, so the bridge has to cross that boundary). The packaged `/usr/share/dbus-1/system.d/app.mackey.conf` policy whitelists this one method for any logged-in user; the daemon then enforces that the caller's UID matches the active local-seat user before acting on the call.
 - No UI, no preferences — pure D-Bus bridge.
 
@@ -114,7 +114,7 @@ Bindings are pure key-event → key-event mappings; there is no syntax for execu
 mackey is designed so that gaining macOS-style shortcuts adds **zero standing privilege** to the user's account. The model rests on four packaged artifacts working together:
 
 1. **Dedicated unprivileged system user.** `mackeyd` runs as the `mackey` system user (no shell, no home directory) — never as `root`, never as a logged-in user.
-2. **Narrow device access via udev + group.** The packaged udev rule sets `GROUP="mackey", MODE="0660"` on `/dev/uinput` and on `/dev/input/event*` nodes tagged `ID_INPUT_KEYBOARD=1` — **keyboards only**. Mice, touchpads, tablets, and gamepads are not exposed to the daemon. The systemd unit pins the daemon to the `mackey` group with `Group=mackey`. The login user is **never** added to `input` or any other privileged group — `id -nG` is identical before and after install. The only root-touching action the user ever performs is the one-time `sudo systemctl enable --now mackey.service` in the first-run wizard.
+2. **Narrow device access via udev + group.** The packaged udev rule sets `GROUP="mackey", MODE="0660"` on `/dev/uinput` and on `/dev/input/event*` nodes tagged `ID_INPUT_KEYBOARD=1` — **keyboards only**. Mice, touchpads, tablets, and gamepads are not exposed to the daemon. The systemd unit pins the daemon to the `mackey` group with `Group=mackey`. The login user is **never** added to `input` or any other privileged group — `id -nG` is identical before and after install. The daemon is enabled and started by the package's post-install (and stopped+disabled on removal); enabling it adds **zero standing privilege to the login user's account** — the daemon runs as the `mackey` system user, not the login user. Installing the package is already a root action, so it serves as the consent gesture for running the daemon.
 3. **Polkit-scoped service control.** `app.mackey.policy` lets the active local-seat user run exactly `start` and `stop` on `mackey.service` — and nothing else — without a `sudo` prompt. That's what the GUI's Pause/Resume toggle calls; arbitrary `systemctl` operations still require `sudo`.
 4. **D-Bus policy + daemon-side caller check.** `/usr/share/dbus-1/system.d/app.mackey.conf` lets any logged-in user *attempt* `app.mackey.FocusTracker.UpdateFocus(app_id, window_title)` on the system bus — no other surface of the daemon is reachable from a user session. The D-Bus policy is not a trust boundary on its own: on every call the daemon reads the caller's UID via `org.freedesktop.DBus.GetConnectionUnixUser` and rejects the call unless that UID matches the active local-seat user reported by logind. A user logged in over SSH, or a non-active session on a multi-seat box, cannot influence the seat user's keymap context.
 

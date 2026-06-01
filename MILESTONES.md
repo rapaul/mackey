@@ -10,7 +10,7 @@ The "skeleton" that walks end-to-end through every milestone is the loop: **sour
 Two cross-cutting invariants are checked at every milestone from M3 onward:
 
 - `id -nG tester` is byte-identical before and after install (the login user is never added to a group).
-- The post-install script's only side effects are: create `mackey` system user/group, drop files under `/usr/`. It never enables a service, never touches GNOME settings.
+- The post-install script's side effects are: create `mackey` system user/group, drop files under `/usr/`, and enable+start `mackey.service` (restart on upgrade; the pre-removal scriptlet stops+disables it). It never adds the login user to a group, never touches GNOME settings.
 
 ---
 
@@ -70,8 +70,8 @@ vmtest <fedora40|ubuntu24> snapshot reset     # rolls back to clean
 - Package linter: post-install scriptlet is idempotent (running it twice does not error).
 
 **VM verification**
-- Install package → `id mackey` shows the new user, `getent group mackey` shows the group, `systemctl is-enabled mackey.service` reports `disabled`.
-- `systemctl enable --now mackey.service` → `systemctl is-active` returns `active`; `ps -o user= -p "$(pidof mackeyd)"` returns `mackey`.
+- Install package → `id mackey` shows the new user, `getent group mackey` shows the group, `systemctl is-enabled mackey.service` reports `enabled` and `systemctl is-active` returns `active`; `ps -o user= -p "$(pidof mackeyd)"` returns `mackey`.
+- Remove package → `systemctl is-enabled mackey.service` reports `disabled` and the daemon is no longer running.
 - `id -nG tester` identical before/after install.
 - `systemctl stop mackey.service` exits cleanly within 2s (the daemon's signal handling actually works).
 
@@ -158,14 +158,14 @@ There is still only the global keymap, so an accepted call has no observable eff
 **What ships:**
 - `mackey-core` gains the three additional built-in keymaps: Files (`org.gnome.Nautilus.desktop`), Firefox (`firefox.desktop`), Ghostty (`com.mitchellh.ghostty.desktop`).
 - Daemon switches the active keymap on `UpdateFocus`, with a **5s stale fallback**: if no `UpdateFocus` arrives for >5s the active keymap reverts to the global one and a warning is logged.
-- Package ships `/usr/share/mackey/gnome-extension/mackey@mackey.app.shell-extension.zip`. The extension subscribes to `global.display::focus-window` and calls `UpdateFocus` over the system bus.
+- Package installs the extension system-wide at `/usr/share/gnome-shell/extensions/mackey@mackey.app/` (extracted from its validated `.shell-extension.zip`). The extension subscribes to `global.display::focus-window` and calls `UpdateFocus` over the system bus.
 
 **Automated tests**
 - Keymap selection unit tests in `mackey-core`: given a sequence of `UpdateFocus` events (with timestamps), assert which keymap is active at each tick, including the 5s stale-fallback timeout.
 - Extension lint via `gnome-extensions pack --schemas` and `eslint`.
 
 **VM verification**
-- After `gnome-extensions install … && gnome-extensions enable …`, switching focus between Firefox and Ghostty produces journal entries `keymap → firefox.desktop` / `keymap → com.mitchellh.ghostty.desktop`.
+- After `gnome-extensions enable mackey@mackey.app` (the extension is already installed system-wide by the package), switching focus between Firefox and Ghostty produces journal entries `keymap → firefox.desktop` / `keymap → com.mitchellh.ghostty.desktop`.
 - Pressing Super+T in Ghostty does the Ghostty-specific action; same key in Firefox does the Firefox one. (Concrete shortcut differences picked per the built-in keymap tables.)
 - `gnome-extensions disable mackey@mackey.app` → within 10s the journal logs the fallback, and per-app behavior reverts to the global keymap.
 - `id -nG tester` unchanged.
@@ -187,9 +187,9 @@ Wizard never executes commands on the user's behalf — only displays them.
 - A scripted-UI test using `dogtail` or `gtk4`'s testing helpers asserting that flipping a mocked state changes the rendered widgets within 5s.
 
 **VM verification**
-- Cold VM with service disabled and extension uninstalled → launch `mackey` from the application menu → wizard shows two pending items.
-- Run the shown `sudo systemctl enable --now mackey.service` in a terminal → within 5s the first item flips to "done".
-- Run the two `gnome-extensions` commands → within 5s the second item flips to "done".
+- Cold VM, service stopped and extension not yet enabled → launch `mackey` from the application menu → wizard shows the service item and the enable-extension item pending.
+- Run the shown `sudo systemctl enable --now mackey.service` in a terminal → within 5s the service item flips to "done".
+- Run `gnome-extensions enable mackey@mackey.app` (already installed system-wide) → within 5s the extension item flips to "done".
 - The wizard transitions to the placeholder satisfied screen.
 
 ---
@@ -241,7 +241,7 @@ Wizard never executes commands on the user's behalf — only displays them.
 
 **Automated tests**
 - The PRD §Verification checklist is encoded as a single integration scenario (`vmtest <distro> verify-prd`):
-  1. Clean install of the tagged package on a fresh snapshot succeeds and post-install does not enable the service.
+  1. Clean install of the tagged package on a fresh snapshot succeeds and post-install enables+starts the service.
   2. Wizard scripted click-through: each item flips to "done" within 5s of running its shown command.
   3. Super+C in Firefox copies; Super+T in Nautilus opens a tab. `id -nG tester` identical before and after install.
   4. Disabling the GNOME extension causes a warning + global-keymap fallback within 10s; re-enabling restores per-app behavior.

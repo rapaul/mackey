@@ -6,7 +6,6 @@
 //! behind a [`CommandRunner`] trait so it can be driven with canned output in
 //! unit tests, with no real services or GNOME session needed.
 
-use std::path::Path;
 use std::process::Command;
 
 /// The UUID of the bundled GNOME Shell extension (see `gnome-extension/`).
@@ -20,12 +19,6 @@ const SERVICE_CONTROL: &str = "/usr/libexec/mackey-service-control";
 /// yields an empty string, which reads as "prerequisite not satisfied".
 pub trait CommandRunner {
     fn run(&self, program: &str, args: &[&str]) -> String;
-
-    /// Whether a filesystem path exists. Used to detect an *installed* (but not
-    /// yet enabled) extension: `gnome-extensions install` unpacks it on disk
-    /// immediately, whereas `gnome-extensions list` won't report it until the
-    /// next login on Wayland.
-    fn path_exists(&self, path: &str) -> bool;
 }
 
 /// The real runner: spawns the process and captures stdout.
@@ -39,46 +32,32 @@ impl CommandRunner for SystemRunner {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default()
     }
-
-    fn path_exists(&self, path: &str) -> bool {
-        Path::new(path).exists()
-    }
 }
 
-/// Which prerequisites are currently satisfied.
+/// Which prerequisites are currently satisfied. The extension is installed
+/// system-wide by the package, so the only thing the user still does is enable
+/// it — there's no separate "installed" prerequisite to track.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetupState {
     pub service_active: bool,
-    pub extension_installed: bool,
     pub extension_enabled: bool,
 }
 
 impl SetupState {
-    /// Both prerequisites met — the wizard hands off to the status view. The
-    /// extension being enabled implies it is installed, so install isn't a
-    /// separate completion gate.
+    /// Both prerequisites met — the wizard hands off to the status view.
     pub fn is_complete(self) -> bool {
         self.service_active && self.extension_enabled
     }
 }
 
-/// Where `gnome-extensions install` unpacks the bundled extension for the
-/// current user.
-fn extension_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    format!("{home}/.local/share/gnome-shell/extensions/{EXTENSION_UUID}")
-}
-
 /// Detect the current setup state. `systemctl is-active` prints `active` only
-/// when the unit is running; the extension is *installed* once its directory
-/// exists on disk, and *enabled* once `gnome-extensions list --enabled` (one
-/// UUID per line) reports ours.
+/// when the unit is running; the extension is *enabled* once
+/// `gnome-extensions list --enabled` (one UUID per line) reports ours.
 pub fn detect(runner: &dyn CommandRunner) -> SetupState {
     let service = runner.run("systemctl", &["is-active", "mackey.service"]);
     let extensions = runner.run("gnome-extensions", &["list", "--enabled"]);
     SetupState {
         service_active: service.trim() == "active",
-        extension_installed: runner.path_exists(&extension_dir()),
         extension_enabled: extensions.lines().any(|line| line.trim() == EXTENSION_UUID),
     }
 }
@@ -117,12 +96,10 @@ pub fn set_service_running(runner: &dyn CommandRunner, running: bool) {
 mod tests {
     use super::*;
 
-    /// A runner that returns canned stdout per program name and a canned
-    /// path-existence result (for the extension's install directory).
+    /// A runner that returns canned stdout per program name.
     struct MockRunner {
         systemctl: String,
         gnome_extensions: String,
-        installed: bool,
     }
 
     impl CommandRunner for MockRunner {
@@ -133,28 +110,22 @@ mod tests {
                 other => panic!("unexpected command: {other}"),
             }
         }
-
-        fn path_exists(&self, _path: &str) -> bool {
-            self.installed
-        }
     }
 
-    fn state(systemctl: &str, gnome_extensions: &str, installed: bool) -> SetupState {
+    fn state(systemctl: &str, gnome_extensions: &str) -> SetupState {
         detect(&MockRunner {
             systemctl: systemctl.to_string(),
             gnome_extensions: gnome_extensions.to_string(),
-            installed,
         })
     }
 
     #[test]
     fn both_satisfied_is_complete() {
-        let s = state("active", "other@x.app\nmackey@mackey.app\n", true);
+        let s = state("active", "other@x.app\nmackey@mackey.app\n");
         assert_eq!(
             s,
             SetupState {
                 service_active: true,
-                extension_installed: true,
                 extension_enabled: true
             }
         );
@@ -162,37 +133,26 @@ mod tests {
     }
 
     #[test]
-    fn installed_but_not_enabled_is_pending() {
-        // The post-install, pre-relogin state on Wayland: the directory exists
-        // but `list --enabled` is still empty until the next login.
-        let s = state("active", "", true);
-        assert!(s.extension_installed);
+    fn not_enabled_is_pending() {
+        // The post-install, pre-enable state: the extension is installed
+        // system-wide but `list --enabled` is still empty until the user enables it.
+        let s = state("active", "");
         assert!(!s.extension_enabled);
         assert!(!s.is_complete());
     }
 
     #[test]
     fn inactive_service_is_pending() {
-        let s = state("inactive", "mackey@mackey.app", true);
+        let s = state("inactive", "mackey@mackey.app");
         assert!(!s.service_active);
         assert!(s.extension_enabled);
         assert!(!s.is_complete());
     }
 
     #[test]
-    fn extension_absent_is_pending() {
-        let s = state("active", "other@x.app\n", false);
-        assert!(s.service_active);
-        assert!(!s.extension_installed);
-        assert!(!s.extension_enabled);
-        assert!(!s.is_complete());
-    }
-
-    #[test]
     fn empty_output_is_all_pending() {
-        let s = state("", "", false);
+        let s = state("", "");
         assert!(!s.service_active);
-        assert!(!s.extension_installed);
         assert!(!s.extension_enabled);
         assert!(!s.is_complete());
     }
@@ -200,14 +160,14 @@ mod tests {
     #[test]
     fn activating_is_not_yet_active() {
         // `systemctl is-active` reports `activating` during startup.
-        let s = state("activating", "mackey@mackey.app", true);
+        let s = state("activating", "mackey@mackey.app");
         assert!(!s.service_active);
     }
 
     #[test]
     fn substring_uuid_does_not_match() {
         // A line that merely contains the UUID as a substring must not count.
-        let s = state("active", "not-mackey@mackey.app.evil", true);
+        let s = state("active", "not-mackey@mackey.app.evil");
         assert!(!s.extension_enabled);
     }
 
@@ -232,10 +192,6 @@ mod tests {
             call.extend(args.iter().map(|a| a.to_string()));
             self.calls.borrow_mut().push(call);
             String::new()
-        }
-
-        fn path_exists(&self, _path: &str) -> bool {
-            false
         }
     }
 

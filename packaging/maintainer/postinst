@@ -1,11 +1,11 @@
 #!/bin/sh
 # mackey post-install scriptlet (shared by the .deb and .rpm).
 #
-# Creates the dedicated, unprivileged system user/group the daemon runs as, then
-# loads uinput and applies the udev rules so device access works immediately.
-# Idempotent: re-running it is a no-op. Per the security contract it deliberately
-# does NOT enable or start mackey.service, never modifies any login user's group
-# membership, and never touches GNOME settings.
+# Creates the dedicated, unprivileged system user/group the daemon runs as,
+# loads uinput, and applies the udev rules so device access works immediately.
+# On first install it enables and starts mackey.service; on upgrade/reinstall it
+# restarts the already-running daemon so the new binary takes effect. It never
+# modifies any login user's group membership and never touches GNOME settings.
 set -e
 
 getent group mackey >/dev/null 2>&1 || groupadd --system mackey
@@ -26,5 +26,24 @@ fi
 # app.mackey.FocusTracker is refused — breaking focus tracking and the per-app
 # keymaps that depend on it. Drop-in files are inert until a reload.
 systemctl reload dbus.service >/dev/null 2>&1 || true
+
+# Pick up the freshly installed unit file before we enable/start it.
+systemctl daemon-reload >/dev/null 2>&1 || true
+
+# First install: enable + start so the daemon runs now and on every boot.
+# Upgrade/reinstall: try-restart so the new binary takes effect (this never
+# starts a unit the user has since stopped). Install vs upgrade is detected per
+# packager:
+#   - .deb (cargo-deb): postinst runs with $1=configure and $2=old version on upgrade.
+#   - .rpm (cargo-generate-rpm): %post runs with $1=1 on install, $1>=2 on upgrade.
+if [ "$1" = configure ] && [ -z "$2" ]; then
+    systemctl enable --now mackey.service >/dev/null 2>&1 || true
+elif [ "$1" = configure ]; then
+    systemctl try-restart mackey.service >/dev/null 2>&1 || true
+elif [ "$1" = 1 ]; then
+    systemctl enable --now mackey.service >/dev/null 2>&1 || true
+elif [ "$1" -ge 2 ] 2>/dev/null; then
+    systemctl try-restart mackey.service >/dev/null 2>&1 || true
+fi
 
 exit 0

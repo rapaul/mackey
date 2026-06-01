@@ -1,0 +1,16 @@
+#!/bin/sh
+# mackey pre-removal scriptlet (shared by the .deb and .rpm).
+#
+# On package removal (NOT upgrade) stop and disable mackey.service — the
+# symmetric counterpart to the enable+start the post-install does on install.
+# On upgrade the unit is left running so the post-install's restart can swap in
+# the new binary without a gap. Install vs upgrade is detected per packager:
+#   - .deb (cargo-deb): prerm runs with $1=remove on removal, $1=upgrade on upgrade.
+#   - .rpm (cargo-generate-rpm): %preun runs with $1=0 on final removal, $1=1 on upgrade.
+set -e
+
+if [ "$1" = remove ] || [ "$1" = 0 ]; then
+    systemctl --no-reload disable --now mackey.service >/dev/null 2>&1 || true
+fi
+
+exit 0

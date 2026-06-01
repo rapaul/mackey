@@ -29,7 +29,7 @@ esac
 
 dest=app.mackey.FocusTracker
 path=/app/mackey/FocusTracker
-zip=/usr/share/mackey/gnome-extension/mackey@mackey.app.shell-extension.zip
+ext_dir=/usr/share/gnome-shell/extensions/mackey@mackey.app
 helper=/usr/libexec/mackey-service-control
 fail=0
 note() { printf '  %s\n' "$*"; }
@@ -47,20 +47,17 @@ echo "############ [$distro] PRD verification ############"
 "$vmtest" "$distro" snapshot reset
 groups_before="$(r 'id -nG tester')"
 
-echo "== 1. clean install does not modify the running system =="
+echo "== 1. clean install enables+starts the service without touching the login user =="
 "$vmtest" "$distro" install "$pkg"
 groups_after="$(r 'id -nG tester')"
 r "$install_evdev" >/dev/null 2>&1
 check "mackey user created" "$(r 'getent passwd mackey >/dev/null && echo yes || echo no')" "yes"
-check "service NOT auto-enabled" "$(r 'systemctl is-enabled mackey.service 2>/dev/null || echo disabled')" "disabled"
+check "service auto-enabled" "$(r 'systemctl is-enabled mackey.service 2>/dev/null || echo disabled')" "enabled"
+check "service auto-started" "$(r 'systemctl is-active mackey.service 2>/dev/null || echo inactive')" "active"
+check "extension installed system-wide" "$(r "test -f '$ext_dir/metadata.json' && echo yes || echo no")" "yes"
 check "groups unchanged by install" "$groups_before" "$groups_after"
 
-echo "== 2. wizard items flip to done within 5s of running their command =="
-check "service item pending pre-enable" "$(r 'systemctl is-active mackey.service || true')" "inactive"
-r 'sudo systemctl enable --now mackey.service' >/dev/null
-sleep 5
-check "service item -> done" "$(r 'systemctl is-active mackey.service')" "active"
-r "gnome-extensions install --force $zip" >/dev/null 2>&1 || true
+echo "== 2. wizard extension item flips to done within 5s of the user enabling it =="
 r 'gnome-extensions enable mackey@mackey.app' >/dev/null 2>&1 || true
 sleep 5
 check "extension item -> done" \

@@ -23,9 +23,11 @@ zbus = "5"
 toml = "0.8"
 
 # --- Debian packaging (cargo-deb) -------------------------------------------
-# Ships /usr/bin/mackeyd and the (disabled) systemd unit. The post-install
-# scriptlet creates the mackey system user/group; it never enables the service.
-# cargo-deb resolves these paths relative to this crate dir, hence ../packaging.
+# Ships /usr/bin/mackeyd and the systemd unit. The post-install scriptlet creates
+# the mackey system user/group and enables+starts the service (restarting it on
+# upgrade); the pre-removal scriptlet stops+disables it. cargo-deb resolves these
+# paths relative to this crate dir, hence ../packaging, and auto-includes the
+# postinst/prerm under maintainer-scripts.
 [package.metadata.deb]
 maintainer = "Richard Paul <richard.a.paul@gmail.com>"
 copyright = "2026, Richard Paul"
@@ -46,25 +48,26 @@ assets = [
     ["../packaging/dbus/app.mackey.conf", "usr/share/dbus-1/system.d/", "644"],
     ["../packaging/polkit/app.mackey.policy", "usr/share/polkit-1/actions/", "644"],
     ["../packaging/mackey-service-control", "usr/libexec/", "755"],
-    ["../target/gnome-extension/mackey@mackey.app.shell-extension.zip", "usr/share/mackey/gnome-extension/", "644"],
+    ["../target/gnome-extension/mackey@mackey.app/metadata.json", "usr/share/gnome-shell/extensions/mackey@mackey.app/", "644"],
+    ["../target/gnome-extension/mackey@mackey.app/extension.js", "usr/share/gnome-shell/extensions/mackey@mackey.app/", "644"],
 ]
 
 # --- RPM packaging (cargo-generate-rpm) -------------------------------------
-# cargo-generate-rpm wants the scriptlet inline (no file include in 0.21) and
-# resolves asset paths from the workspace root. The post_install_script below is
-# an exact copy of packaging/maintainer/postinst; the `postinst_in_sync` test
-# fails if the two ever drift.
+# cargo-generate-rpm wants the scriptlets inline (no file include in 0.21) and
+# resolves asset paths from the workspace root. post_install_script is an exact
+# copy of packaging/maintainer/postinst and pre_uninstall_script of
+# packaging/maintainer/prerm; the `postinst_in_sync` test fails if either drifts.
 [package.metadata.generate-rpm]
 summary = "macOS-style keyboard shortcuts on Linux (GNOME/Wayland)"
 post_install_script = '''
 #!/bin/sh
 # mackey post-install scriptlet (shared by the .deb and .rpm).
 #
-# Creates the dedicated, unprivileged system user/group the daemon runs as, then
-# loads uinput and applies the udev rules so device access works immediately.
-# Idempotent: re-running it is a no-op. Per the security contract it deliberately
-# does NOT enable or start mackey.service, never modifies any login user's group
-# membership, and never touches GNOME settings.
+# Creates the dedicated, unprivileged system user/group the daemon runs as,
+# loads uinput, and applies the udev rules so device access works immediately.
+# On first install it enables and starts mackey.service; on upgrade/reinstall it
+# restarts the already-running daemon so the new binary takes effect. It never
+# modifies any login user's group membership and never touches GNOME settings.
 set -e
 
 getent group mackey >/dev/null 2>&1 || groupadd --system mackey
@@ -86,6 +89,43 @@ fi
 # keymaps that depend on it. Drop-in files are inert until a reload.
 systemctl reload dbus.service >/dev/null 2>&1 || true
 
+# Pick up the freshly installed unit file before we enable/start it.
+systemctl daemon-reload >/dev/null 2>&1 || true
+
+# First install: enable + start so the daemon runs now and on every boot.
+# Upgrade/reinstall: try-restart so the new binary takes effect (this never
+# starts a unit the user has since stopped). Install vs upgrade is detected per
+# packager:
+#   - .deb (cargo-deb): postinst runs with $1=configure and $2=old version on upgrade.
+#   - .rpm (cargo-generate-rpm): %post runs with $1=1 on install, $1>=2 on upgrade.
+if [ "$1" = configure ] && [ -z "$2" ]; then
+    systemctl enable --now mackey.service >/dev/null 2>&1 || true
+elif [ "$1" = configure ]; then
+    systemctl try-restart mackey.service >/dev/null 2>&1 || true
+elif [ "$1" = 1 ]; then
+    systemctl enable --now mackey.service >/dev/null 2>&1 || true
+elif [ "$1" -ge 2 ] 2>/dev/null; then
+    systemctl try-restart mackey.service >/dev/null 2>&1 || true
+fi
+
+exit 0
+'''
+pre_uninstall_script = '''
+#!/bin/sh
+# mackey pre-removal scriptlet (shared by the .deb and .rpm).
+#
+# On package removal (NOT upgrade) stop and disable mackey.service — the
+# symmetric counterpart to the enable+start the post-install does on install.
+# On upgrade the unit is left running so the post-install's restart can swap in
+# the new binary without a gap. Install vs upgrade is detected per packager:
+#   - .deb (cargo-deb): prerm runs with $1=remove on removal, $1=upgrade on upgrade.
+#   - .rpm (cargo-generate-rpm): %preun runs with $1=0 on final removal, $1=1 on upgrade.
+set -e
+
+if [ "$1" = remove ] || [ "$1" = 0 ]; then
+    systemctl --no-reload disable --now mackey.service >/dev/null 2>&1 || true
+fi
+
 exit 0
 '''
 assets = [
@@ -98,5 +138,6 @@ assets = [
     { source = "packaging/dbus/app.mackey.conf", dest = "/usr/share/dbus-1/system.d/app.mackey.conf", mode = "0644" },
     { source = "packaging/polkit/app.mackey.policy", dest = "/usr/share/polkit-1/actions/app.mackey.policy", mode = "0644" },
     { source = "packaging/mackey-service-control", dest = "/usr/libexec/mackey-service-control", mode = "0755" },
-    { source = "target/gnome-extension/mackey@mackey.app.shell-extension.zip", dest = "/usr/share/mackey/gnome-extension/mackey@mackey.app.shell-extension.zip", mode = "0644" },
+    { source = "target/gnome-extension/mackey@mackey.app/metadata.json", dest = "/usr/share/gnome-shell/extensions/mackey@mackey.app/metadata.json", mode = "0644" },
+    { source = "target/gnome-extension/mackey@mackey.app/extension.js", dest = "/usr/share/gnome-shell/extensions/mackey@mackey.app/extension.js", mode = "0644" },
 ]

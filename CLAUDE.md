@@ -68,8 +68,9 @@ Cargo workspace (the `gnome-extension/` JS and `packaging/` are outside the work
   belongs to v0.2, not this work.
 - The security model is the hard part. Never widen the daemon's privilege: it runs as
   an unprivileged system user, gets `/dev/input` access only via the udev group ACL,
-  and **never** modifies any login user's group membership. The packaging post-install
-  must not enable the service or touch GNOME settings. Treat the PRD's *Security model*
-  section as a contract.
+  and **never** modifies any login user's group membership. The packaging enables and
+  starts `mackey.service` on install (restarts on upgrade, stops+disables on removal),
+  but must still never modify any login user's group membership or touch GNOME settings.
+  Treat the PRD's *Security model* section as a contract.
 - D-Bus calls into the daemon are UID-checked against the active local-seat user
   (logind). Don't bypass that check.

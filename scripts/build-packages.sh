@@ -19,6 +19,15 @@ mkdir -p "$ext_out"
 # the bundle layout, and fails the build on a malformed extension.
 gnome-extensions pack gnome-extension --out-dir "$ext_out" --force
 echo "  -> $ext_out/mackey@mackey.app.shell-extension.zip"
+# Extract the validated bundle so the package can ship it system-wide under
+# /usr/share/gnome-shell/extensions/ (the package manager then tracks and removes
+# the individual files). Packaging the extracted dir, not the zip, is what makes
+# the extension available to every user without a per-user `gnome-extensions install`.
+ext_dir="$ext_out/mackey@mackey.app"
+rm -rf "$ext_dir"
+mkdir -p "$ext_dir"
+unzip -q -o "$ext_out/mackey@mackey.app.shell-extension.zip" -d "$ext_dir"
+echo "  -> extracted to $ext_dir/ for system-wide install"
 # eslint is best-effort (not installed on the dev box by default); skip if absent
 # rather than pulling it from the network, mirroring the rpmlint handling below.
 if npx --no-install eslint --version >/dev/null 2>&1; then
