@@ -9,8 +9,6 @@
 //! - **Firefox** (`firefox.desktop`) — global, plus Super+R -> Ctrl+R (reload),
 //!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Left/Right ->
 //!   Alt+Left/Right (back/forward).
-//! - **GNOME Terminal** (`org.gnome.Terminal.desktop`) — terminal convention:
-//!   Super+{C,V,X,T,W,N} -> Ctrl+Shift+{same}; the rest map to Ctrl+{same}.
 //! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults (its
 //!   macOS `super+` bindings rewritten to the Linux bindings): Super+{C,V,A,F,N,
 //!   T,W,Q} -> Ctrl+Shift+{same}; Super+{,/=/-/0/Enter} -> Ctrl+{same};
@@ -233,7 +231,7 @@ impl Keymap {
 
 // Tab navigation, shared by every keymap: Cmd+Shift+[ / ] -> Ctrl+PageUp /
 // PageDown (prev/next tab), the near-universal Linux tab-switch shortcut —
-// Firefox, Nautilus, GNOME Terminal, and Ghostty all bind it. The trigger Shift
+// Firefox, Nautilus, and Ghostty all bind it. The trigger Shift
 // is an input modifier only, so the output is a clean Ctrl+PageUp/PageDown.
 const TAB_PREV: Binding = Binding {
     in_key: KEY_LEFTBRACE,
@@ -321,26 +319,6 @@ static FIREFOX: Keymap = Keymap {
         key(KEY_RIGHT, ALT),
     ],
 };
-
-// Shared by every terminal keymap. Terminal copy/paste/cut and tab/window/split
-// need Shift, since plain Ctrl+C is SIGINT in a terminal; the remaining global
-// letters keep plain Ctrl.
-const TERMINAL_ENTRIES: &[Binding] = &[
-    key(KEY_C, CTRL_SHIFT),
-    key(KEY_V, CTRL_SHIFT),
-    key(KEY_X, CTRL_SHIFT),
-    key(KEY_T, CTRL_SHIFT),
-    key(KEY_W, CTRL_SHIFT),
-    key(KEY_N, CTRL_SHIFT),
-    key(KEY_A, CTRL),
-    key(KEY_Z, CTRL),
-    key(KEY_S, CTRL),
-    key(KEY_F, CTRL),
-    key(KEY_O, CTRL),
-    key(KEY_Q, CTRL),
-    TAB_PREV,
-    TAB_NEXT,
-];
 
 // Ghostty's own defaults, derived from `src/config/Config.zig` (the macOS
 // `super+` bindings) cross-referenced with `ghostty +list-keybinds --default`
@@ -494,18 +472,12 @@ static GHOSTTY: Keymap = Keymap {
     bindings: GHOSTTY_ENTRIES,
 };
 
-static GNOME_TERMINAL: Keymap = Keymap {
-    id: "org.gnome.Terminal.desktop",
-    bindings: TERMINAL_ENTRIES,
-};
-
 /// Resolve a focused app id to its built-in keymap, falling back to global.
 fn keymap_for(app_id: Option<&str>) -> &'static Keymap {
     match app_id {
         Some("org.gnome.Nautilus.desktop") => &FILES,
         Some("firefox.desktop") => &FIREFOX,
         Some("com.mitchellh.ghostty.desktop") => &GHOSTTY,
-        Some("org.gnome.Terminal.desktop") => &GNOME_TERMINAL,
         _ => &GLOBAL,
     }
 }
@@ -934,7 +906,7 @@ mod tests {
     /// tab), with the trigger Shift consumed (never emitted).
     #[test]
     fn every_keymap_maps_cmd_shift_brackets_to_tab_nav() {
-        for keymap in [&GLOBAL, &FILES, &FIREFOX, &GNOME_TERMINAL, &GHOSTTY] {
+        for keymap in [&GLOBAL, &FILES, &FIREFOX, &GHOSTTY] {
             for (in_key, out_key) in [(KEY_LEFTBRACE, KEY_PAGEUP), (KEY_RIGHTBRACE, KEY_PAGEDOWN)] {
                 let mut e = KeymapEngine::new();
                 let out = drive(
@@ -1108,44 +1080,6 @@ mod tests {
                 KeyEvent::new(KEY_S, 0),
                 KeyEvent::new(LEFTMETA, 0),
             ]
-        );
-    }
-
-    #[test]
-    fn gnome_terminal_copy_gets_ctrl_shift() {
-        let mut e = KeymapEngine::new();
-        let out = drive(
-            &mut e,
-            &GNOME_TERMINAL,
-            &[(LEFTMETA, 1), (KEY_C, 1), (KEY_C, 0), (LEFTMETA, 0)],
-        );
-        assert_eq!(
-            out,
-            vec![
-                KeyEvent::new(LEFTCTRL, 1),
-                KeyEvent::new(LEFTSHIFT, 1),
-                KeyEvent::new(KEY_C, 1),
-                KeyEvent::new(KEY_C, 0),
-                KeyEvent::new(LEFTSHIFT, 0),
-                KeyEvent::new(LEFTCTRL, 0),
-            ]
-        );
-    }
-
-    /// Ghostty quit is Cmd+Q -> Ctrl+Shift+Q on Linux, whereas GNOME Terminal
-    /// follows the generic terminal convention (plain Ctrl+Q). They no longer
-    /// share one table.
-    #[test]
-    fn ghostty_and_gnome_terminal_differ_on_quit() {
-        assert_eq!(
-            GHOSTTY.binding_for(KEY_Q, NO_MODS).map(|b| b.out_mods),
-            Some(CTRL_SHIFT)
-        );
-        assert_eq!(
-            GNOME_TERMINAL
-                .binding_for(KEY_Q, NO_MODS)
-                .map(|b| b.out_mods),
-            Some(CTRL)
         );
     }
 
@@ -1514,10 +1448,8 @@ mod tests {
             keymap_for(Some("com.mitchellh.ghostty.desktop")).id,
             "com.mitchellh.ghostty.desktop"
         );
-        assert_eq!(
-            keymap_for(Some("org.gnome.Terminal.desktop")).id,
-            "org.gnome.Terminal.desktop"
-        );
+        // GNOME Terminal has no built-in keymap: it falls back to global.
+        assert_eq!(keymap_for(Some("org.gnome.Terminal.desktop")).id, "global");
         assert_eq!(keymap_for(Some("unknown.desktop")).id, "global");
         assert_eq!(keymap_for(None).id, "global");
     }

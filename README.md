@@ -87,22 +87,6 @@ All of the common shortcuts above, plus history navigation:
 | <kbd>⌘</kbd><kbd>↵</kbd> | Toggle fullscreen |
 | <kbd>⌘</kbd><kbd>,</kbd> | Open config |
 
-### GNOME Terminal
-
-Terminal copy/paste/cut and tab/window keys need Shift on Linux (plain
-<kbd>⌃</kbd><kbd>C</kbd> is SIGINT), which mackey handles for you:
-
-| Press | Does |
-| --- | --- |
-| <kbd>⌘</kbd><kbd>C</kbd> | Copy |
-| <kbd>⌘</kbd><kbd>V</kbd> | Paste |
-| <kbd>⌘</kbd><kbd>X</kbd> | Cut |
-| <kbd>⌘</kbd><kbd>T</kbd> | New tab |
-| <kbd>⌘</kbd><kbd>N</kbd> | New window |
-| <kbd>⌘</kbd><kbd>W</kbd> | Close |
-| <kbd>⌘</kbd><kbd>A</kbd> | Select all |
-| <kbd>⌘</kbd><kbd>F</kbd> | Find |
-
 ### Files (Nautilus)
 
 All of the common shortcuts above, plus:
