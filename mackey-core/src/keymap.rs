@@ -6,7 +6,8 @@
 //!
 //! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
-//! - **Firefox** (`firefox.desktop`) — global, plus Super+Left/Right ->
+//! - **Firefox** (`firefox.desktop`) — global, plus Super+R -> Ctrl+R (reload),
+//!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Left/Right ->
 //!   Alt+Left/Right (back/forward).
 //! - **GNOME Terminal** (`org.gnome.Terminal.desktop`) — terminal convention:
 //!   Super+{C,V,X,T,W,N} -> Ctrl+Shift+{same}; the rest map to Ctrl+{same}.
@@ -64,6 +65,7 @@ const KEY_W: u16 = KeyCode::KEY_W.code();
 const KEY_Q: u16 = KeyCode::KEY_Q.code();
 const KEY_T: u16 = KeyCode::KEY_T.code();
 const KEY_P: u16 = KeyCode::KEY_P.code();
+const KEY_R: u16 = KeyCode::KEY_R.code();
 const KEY_LEFT: u16 = KeyCode::KEY_LEFT.code();
 const KEY_RIGHT: u16 = KeyCode::KEY_RIGHT.code();
 const KEY_UP: u16 = KeyCode::KEY_UP.code();
@@ -305,6 +307,15 @@ static FIREFOX: Keymap = Keymap {
         key(KEY_T, CTRL),
         TAB_PREV,
         TAB_NEXT,
+        // Firefox-specific: reload (Cmd+R -> Ctrl+R) and the private-window /
+        // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P).
+        key(KEY_R, CTRL),
+        Binding {
+            in_key: KEY_P,
+            in_mods: SHIFT_IN,
+            out_mods: CTRL_SHIFT,
+            out_key: KEY_P,
+        },
         // Firefox-specific: history back / forward.
         key(KEY_LEFT, ALT),
         key(KEY_RIGHT, ALT),
@@ -1419,6 +1430,56 @@ mod tests {
                 KeyEvent::new(KEY_LEFT, 1),
                 KeyEvent::new(KEY_LEFT, 0),
                 KeyEvent::new(LEFTALT, 0),
+            ]
+        );
+    }
+
+    /// Firefox reload: Cmd+R -> Ctrl+R (plain Ctrl, same key).
+    #[test]
+    fn firefox_reload_gets_ctrl_r() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &FIREFOX,
+            &[(LEFTMETA, 1), (KEY_R, 1), (KEY_R, 0), (LEFTMETA, 0)],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(KEY_R, 1),
+                KeyEvent::new(KEY_R, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Firefox private window: Cmd+Shift+P -> Ctrl+Shift+P. The trigger Shift is
+    /// an input modifier; the Ctrl+Shift output comes from the binding.
+    #[test]
+    fn firefox_shift_p_gets_ctrl_shift_p() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &FIREFOX,
+            &[
+                (LEFTMETA, 1),
+                (LEFTSHIFT, 1),
+                (KEY_P, 1),
+                (KEY_P, 0),
+                (LEFTSHIFT, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTSHIFT, 1),
+                KeyEvent::new(KEY_P, 1),
+                KeyEvent::new(KEY_P, 0),
+                KeyEvent::new(LEFTSHIFT, 0),
+                KeyEvent::new(LEFTCTRL, 0),
             ]
         );
     }
