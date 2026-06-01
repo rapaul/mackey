@@ -194,6 +194,9 @@ provision() {
             && systemctl cat display-manager.service >/dev/null 2>&1 \
             && [ "$(systemctl get-default)" = graphical.target ]' \
         || { poweroff_vm; die "GNOME/gdm not present after provisioning"; }
+    # Out-of-the-box test apps must be baked into the golden (see cloud-init).
+    vssh 'command -v firefox >/dev/null && command -v ghostty >/dev/null' \
+        || { poweroff_vm; die "test apps (firefox/ghostty) missing after provisioning"; }
     log "GNOME provisioned; sealing golden image"
     poweroff_vm
     rm -f "$RUN/seed.iso" "$RUN/user-data" "$RUN/meta-data"

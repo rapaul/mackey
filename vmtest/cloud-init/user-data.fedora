@@ -23,7 +23,11 @@ packages:
   # the session. Neither is pulled by the minimal set above.
   - gjs
   - gnome-terminal
+  # Out-of-the-box test apps. firefox is in the default repos; ghostty isn't, so
+  # it's installed from the scottames COPR in runcmd below.
+  - firefox
 runcmd:
+  - [ bash, -c, "dnf -y copr enable scottames/ghostty && dnf install -y ghostty" ]
   - [ bash, -c, "printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=tester\nWaylandEnable=true\n' > /etc/gdm/custom.conf" ]
   - [ systemctl, set-default, graphical.target ]
   - [ systemctl, enable, gdm ]

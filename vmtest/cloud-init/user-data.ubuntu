@@ -24,7 +24,35 @@ packages:
   # the session. Neither is pulled by the minimal set above.
   - gjs
   - gnome-terminal
+  # curl backs the test-app install in runcmd (Mozilla apt repo key + the
+  # ghostty release lookup).
+  - curl
+write_files:
+  # Out-of-the-box test apps. Ubuntu's archive `firefox` is a snap stub and
+  # ghostty has no apt package, so install firefox from Mozilla's apt repo (a
+  # real .deb, pinned above the snap) and ghostty from the mkasberg release
+  # matching this Ubuntu version.
+  - path: /usr/local/sbin/provision-test-apps.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      install -d -m 0755 /etc/apt/keyrings
+      curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg \
+        -o /etc/apt/keyrings/packages.mozilla.org.asc
+      echo 'deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main' \
+        > /etc/apt/sources.list.d/mozilla.list
+      printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' \
+        > /etc/apt/preferences.d/mozilla
+      apt-get update
+      apt-get install -y firefox
+      ver="$(. /etc/os-release; echo "$VERSION_ID")"
+      url="$(curl -fsSL https://api.github.com/repos/mkasberg/ghostty-ubuntu/releases/latest \
+        | grep -o "https://[^\"]*amd64_${ver}\.deb" | head -1)"
+      curl -fsSL "$url" -o /tmp/ghostty.deb
+      apt-get install -y /tmp/ghostty.deb
 runcmd:
+  - [ bash, /usr/local/sbin/provision-test-apps.sh ]
   - [ bash, -c, "mkdir -p /etc/gdm3 && printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=tester\nWaylandEnable=true\n' > /etc/gdm3/custom.conf" ]
   - [ systemctl, set-default, graphical.target ]
   - [ systemctl, enable, gdm3 ]
