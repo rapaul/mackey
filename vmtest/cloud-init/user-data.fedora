@@ -18,6 +18,11 @@ packages:
   - gdm
   - gnome-session-wayland-session
   - nautilus
+  # gjs backs the org.gnome.Shell.Extensions D-Bus service that `gnome-extensions`
+  # (and the mackey wizard) drives; gnome-terminal gives an interactive shell in
+  # the session. Neither is pulled by the minimal set above.
+  - gjs
+  - gnome-terminal
 runcmd:
   - [ bash, -c, "printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=tester\nWaylandEnable=true\n' > /etc/gdm/custom.conf" ]
   - [ systemctl, set-default, graphical.target ]
