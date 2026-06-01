@@ -8,8 +8,9 @@
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
 //! - **Firefox** (`firefox.desktop`) — global, plus Super+Left/Right ->
 //!   Alt+Left/Right (back/forward).
-//! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — terminal convention:
-//!   Super+{C,V,X,T,W,N} -> Ctrl+Shift+{same}; the rest map to Ctrl+{same}.
+//! - **Ghostty** (`com.mitchellh.ghostty.desktop`) and **GNOME Terminal**
+//!   (`org.gnome.Terminal.desktop`) — terminal convention: Super+{C,V,X,T,W,N}
+//!   -> Ctrl+Shift+{same}; the rest map to Ctrl+{same}.
 //!
 //! In every keymap, anything not in the active table passes through untouched:
 //! a key with Super *not* held, a lone Super tap (emitted on release so GNOME's
@@ -129,25 +130,32 @@ static FIREFOX: Keymap = Keymap {
     ],
 };
 
+// Shared by every terminal keymap. Terminal copy/paste/cut and tab/window/split
+// need Shift, since plain Ctrl+C is SIGINT in a terminal; the remaining global
+// letters keep plain Ctrl.
+const TERMINAL_ENTRIES: &[(u16, &[u16])] = &[
+    (KEY_C, CTRL_SHIFT),
+    (KEY_V, CTRL_SHIFT),
+    (KEY_X, CTRL_SHIFT),
+    (KEY_T, CTRL_SHIFT),
+    (KEY_W, CTRL_SHIFT),
+    (KEY_N, CTRL_SHIFT),
+    (KEY_A, CTRL),
+    (KEY_Z, CTRL),
+    (KEY_S, CTRL),
+    (KEY_F, CTRL),
+    (KEY_O, CTRL),
+    (KEY_Q, CTRL),
+];
+
 static GHOSTTY: Keymap = Keymap {
     id: "com.mitchellh.ghostty.desktop",
-    entries: &[
-        // Terminal copy/paste/cut and tab/window/split need Shift, since plain
-        // Ctrl+C is SIGINT in a terminal.
-        (KEY_C, CTRL_SHIFT),
-        (KEY_V, CTRL_SHIFT),
-        (KEY_X, CTRL_SHIFT),
-        (KEY_T, CTRL_SHIFT),
-        (KEY_W, CTRL_SHIFT),
-        (KEY_N, CTRL_SHIFT),
-        // The remaining global letters keep plain Ctrl.
-        (KEY_A, CTRL),
-        (KEY_Z, CTRL),
-        (KEY_S, CTRL),
-        (KEY_F, CTRL),
-        (KEY_O, CTRL),
-        (KEY_Q, CTRL),
-    ],
+    entries: TERMINAL_ENTRIES,
+};
+
+static GNOME_TERMINAL: Keymap = Keymap {
+    id: "org.gnome.Terminal.desktop",
+    entries: TERMINAL_ENTRIES,
 };
 
 /// Resolve a focused app id to its built-in keymap, falling back to global.
@@ -156,6 +164,7 @@ fn keymap_for(app_id: Option<&str>) -> &'static Keymap {
         Some("org.gnome.Nautilus.desktop") => &FILES,
         Some("firefox.desktop") => &FIREFOX,
         Some("com.mitchellh.ghostty.desktop") => &GHOSTTY,
+        Some("org.gnome.Terminal.desktop") => &GNOME_TERMINAL,
         _ => &GLOBAL,
     }
 }
@@ -490,6 +499,33 @@ mod tests {
     }
 
     #[test]
+    fn gnome_terminal_copy_gets_ctrl_shift() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GNOME_TERMINAL,
+            &[(LEFTMETA, 1), (KEY_C, 1), (KEY_C, 0), (LEFTMETA, 0)],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTSHIFT, 1),
+                KeyEvent::new(KEY_C, 1),
+                KeyEvent::new(KEY_C, 0),
+                KeyEvent::new(LEFTSHIFT, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Both terminals share the same convention table.
+    #[test]
+    fn gnome_terminal_matches_ghostty_convention() {
+        assert_eq!(GNOME_TERMINAL.entries, GHOSTTY.entries);
+    }
+
+    #[test]
     fn firefox_arrows_get_alt() {
         let mut e = KeymapEngine::new();
         let out = drive(
@@ -537,6 +573,10 @@ mod tests {
         assert_eq!(
             keymap_for(Some("com.mitchellh.ghostty.desktop")).id,
             "com.mitchellh.ghostty.desktop"
+        );
+        assert_eq!(
+            keymap_for(Some("org.gnome.Terminal.desktop")).id,
+            "org.gnome.Terminal.desktop"
         );
         assert_eq!(keymap_for(Some("unknown.desktop")).id, "global");
         assert_eq!(keymap_for(None).id, "global");
