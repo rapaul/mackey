@@ -36,7 +36,7 @@ note() { printf '  %s\n' "$*"; }
 check() { if [ "$2" = "$3" ]; then note "PASS: $1 ($2)"; else note "FAIL: $1 — got [$2], want [$3]"; fail=1; fi; }
 r() { "$vmtest" "$distro" run "$1"; }
 journal_has() { r "sudo journalctl -u mackey.service --no-pager | grep -qF '$1' && echo yes || echo no"; }
-set_focus() { r "dbus-send --system --dest=$dest $path ${dest}.UpdateFocus string:$1 string:Test" >/dev/null 2>&1 || true; }
+set_focus() { r "gdbus call --system --dest $dest --object-path $path --method ${dest}.UpdateFocus $1 Test" >/dev/null 2>&1 || true; }
 inject() { # $1 = python injector path in repo, $2... = args
     local script="$1"; shift
     local b64; b64="$(base64 -w0 "$script")"

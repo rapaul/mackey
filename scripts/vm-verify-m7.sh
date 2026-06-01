@@ -39,21 +39,23 @@ check "name on system bus" \
     "$(r "busctl --system list --no-pager | grep -q $dest && echo yes || echo no")" "yes"
 
 echo "== [$distro] UpdateFocus from the active-seat user (tester) is accepted =="
-r "dbus-send --system --print-reply --dest=$dest $path ${dest}.UpdateFocus string:firefox.desktop string:Test" >/dev/null 2>&1 || true
+r "gdbus call --system --dest $dest --object-path $path --method ${dest}.UpdateFocus firefox.desktop Test" >/dev/null 2>&1 || true
 sleep 0.5
-check "journal: accepted" "$(journal_has 'accepted UpdateFocus app_id=firefox.desktop')" "yes"
+# The daemon no longer logs accepted calls; an accepted call is observable as
+# the active keymap switching to the focused app.
+check "journal: accepted (keymap switched)" "$(journal_has 'keymap → firefox.desktop')" "yes"
 
 echo "== [$distro] UpdateFocus from a different user is rejected =="
 r 'id -u mallory >/dev/null 2>&1 || sudo useradd --no-create-home mallory' >/dev/null
 mallory_uid="$(r 'id -u mallory')"
-r "sudo -u mallory dbus-send --system --dest=$dest $path ${dest}.UpdateFocus string:evil.desktop string:x" >/dev/null 2>&1 || true
+r "sudo -u mallory gdbus call --system --dest $dest --object-path $path --method ${dest}.UpdateFocus evil.desktop x" >/dev/null 2>&1 || true
 sleep 0.5
 check "journal: rejected uid=$mallory_uid" "$(journal_has "rejected UpdateFocus from uid=$mallory_uid")" "yes"
-# And the spoofed app id must NOT have been recorded as accepted.
-check "spoof not accepted" "$(journal_has 'accepted UpdateFocus app_id=evil.desktop')" "no"
+# And the spoofed app id must NOT have switched the keymap.
+check "spoof not accepted" "$(journal_has 'keymap → evil.desktop')" "no"
 
 echo "== [$distro] D-Bus policy permits only UpdateFocus =="
-out="$(r "dbus-send --system --print-reply --dest=$dest $path org.freedesktop.DBus.Introspectable.Introspect 2>&1" || true)"
+out="$(r "gdbus introspect --system --dest $dest --object-path $path 2>&1" || true)"
 check "Introspect denied by policy" \
     "$(echo "$out" | grep -qiE 'AccessDenied|Rejected send' && echo denied || echo allowed)" "denied"
 
