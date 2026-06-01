@@ -88,7 +88,7 @@ Keymaps are compiled into the daemon — there is no config file, no `~/.config/
 - **Files** (`org.gnome.Nautilus.desktop`)
 - **Firefox** (`firefox.desktop`)
 - **GNOME Terminal** (`org.gnome.Terminal.desktop`) — terminal convention: Super+{C,V,X,T,W,N} -> Ctrl+Shift+{same}, the rest -> Ctrl+{same}
-- **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults, derived from `src/config/Config.zig` (the macOS `super+` bindings) against `ghostty +list-keybinds --default` (Linux): Super+{C,V,A,F,N,T,W,Q} -> Ctrl+Shift+{same}; Super+{`,`/`=`/`-`/0/Enter} -> Ctrl+{same}; Super+{1..9} -> Alt+{same} (tab navigation). Bindings whose macOS trigger carries an extra input modifier (super+shift+p, alt+super+i) or remaps the key (super+d new-split) can't be expressed by the same-key engine and are omitted.
+- **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults, derived from `src/config/Config.zig` (the macOS `super+` bindings) against `ghostty +list-keybinds --default` (Linux): Super+{C,V,A,F,N,T,W,Q} -> Ctrl+Shift+{same}; Super+{`,`/`=`/`-`/0/Enter} -> Ctrl+{same}; Super+{1..9} -> Alt+{same} (tab navigation); Super+Shift+{`,`/Enter/P} -> Ctrl+Shift+{same} (reload-config / zoom-split / command-palette); and splits Super+D -> Ctrl+Shift+O and Super+Shift+D -> Ctrl+Shift+E. Bindings whose macOS trigger carries Alt or Ctrl as an input modifier (alt+super+i inspector, super+ctrl arrows for goto/resize split) remain out of scope.
 
 Bindings are pure key-event → key-event mappings; there is no syntax for executing commands or shell. A future v0.2 will introduce a user-editable TOML config; the MVP keeps the surface deliberately small so the install footprint, the threat model, and the daemon's userland data dependencies stay simple.
 
