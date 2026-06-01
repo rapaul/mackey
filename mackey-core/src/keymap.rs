@@ -4,8 +4,7 @@
 //! their Linux equivalents. The exact rewrite depends on the **active keymap**,
 //! which the daemon selects from the focused app (M8):
 //!
-//! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}, plus
-//!   Super+Shift+[ / ] -> Ctrl+PageUp / PageDown (prev/next tab).
+//! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
 //! - **Firefox** (`firefox.desktop`) — global, plus Super+Left/Right ->
 //!   Alt+Left/Right (back/forward).
@@ -19,6 +18,10 @@
 //!   -> Ctrl+Shift+E; and split navigation Super+[ / ] -> Super+Ctrl+[ / ],
 //!   Super+Alt+Arrow -> Ctrl+Alt+Arrow (goto), Super+Ctrl+Arrow ->
 //!   Super+Ctrl+Shift+Arrow (resize).
+//!
+//! Every keymap above also carries the shared tab-navigation pair: Super+Shift+[
+//! / ] -> Ctrl+PageUp / PageDown (prev/next tab) — for Ghostty this is
+//! previous_tab/next_tab, distinct from goto_split's Super+[ / ].
 //!
 //! A binding may therefore differ from the global "same key" rule in two ways: it
 //! can require extra **input modifiers** (Shift/Ctrl/Alt) as part of the trigger —
@@ -226,6 +229,23 @@ impl Keymap {
     }
 }
 
+// Tab navigation, shared by every keymap: Cmd+Shift+[ / ] -> Ctrl+PageUp /
+// PageDown (prev/next tab), the near-universal Linux tab-switch shortcut —
+// Firefox, Nautilus, GNOME Terminal, and Ghostty all bind it. The trigger Shift
+// is an input modifier only, so the output is a clean Ctrl+PageUp/PageDown.
+const TAB_PREV: Binding = Binding {
+    in_key: KEY_LEFTBRACE,
+    in_mods: SHIFT_IN,
+    out_mods: CTRL,
+    out_key: KEY_PAGEUP,
+};
+const TAB_NEXT: Binding = Binding {
+    in_key: KEY_RIGHTBRACE,
+    in_mods: SHIFT_IN,
+    out_mods: CTRL,
+    out_key: KEY_PAGEDOWN,
+};
+
 static GLOBAL: Keymap = Keymap {
     id: "global",
     bindings: &[
@@ -241,19 +261,8 @@ static GLOBAL: Keymap = Keymap {
         key(KEY_W, CTRL),
         key(KEY_Q, CTRL),
         key(KEY_T, CTRL),
-        // Tab navigation: Cmd+Shift+[ / ] -> Ctrl+PageUp / PageDown (prev/next tab).
-        Binding {
-            in_key: KEY_LEFTBRACE,
-            in_mods: SHIFT_IN,
-            out_mods: CTRL,
-            out_key: KEY_PAGEUP,
-        },
-        Binding {
-            in_key: KEY_RIGHTBRACE,
-            in_mods: SHIFT_IN,
-            out_mods: CTRL,
-            out_key: KEY_PAGEDOWN,
-        },
+        TAB_PREV,
+        TAB_NEXT,
     ],
 };
 
@@ -272,6 +281,8 @@ static FILES: Keymap = Keymap {
         key(KEY_W, CTRL),
         key(KEY_Q, CTRL),
         key(KEY_T, CTRL),
+        TAB_PREV,
+        TAB_NEXT,
         // Files-specific: go to the parent directory.
         key(KEY_UP, ALT),
     ],
@@ -292,6 +303,8 @@ static FIREFOX: Keymap = Keymap {
         key(KEY_W, CTRL),
         key(KEY_Q, CTRL),
         key(KEY_T, CTRL),
+        TAB_PREV,
+        TAB_NEXT,
         // Firefox-specific: history back / forward.
         key(KEY_LEFT, ALT),
         key(KEY_RIGHT, ALT),
@@ -314,6 +327,8 @@ const TERMINAL_ENTRIES: &[Binding] = &[
     key(KEY_F, CTRL),
     key(KEY_O, CTRL),
     key(KEY_Q, CTRL),
+    TAB_PREV,
+    TAB_NEXT,
 ];
 
 // Ghostty's own defaults, derived from `src/config/Config.zig` (the macOS
@@ -456,6 +471,11 @@ const GHOSTTY_ENTRIES: &[Binding] = &[
         out_mods: SUPER_CTRL_SHIFT,
         out_key: KEY_RIGHT,
     },
+    // Tab navigation: Cmd+Shift+[ / ] -> previous_tab / next_tab (Ghostty binds
+    // these to Ctrl+PageUp / PageDown on Linux). Distinct from goto_split's
+    // Cmd+[ / ] above by the Shift modifier.
+    TAB_PREV,
+    TAB_NEXT,
 ];
 
 static GHOSTTY: Keymap = Keymap {
@@ -897,6 +917,40 @@ mod tests {
                 KeyEvent::new(LEFTCTRL, 0),
             ]
         );
+    }
+
+    /// Every app keymap maps Cmd+Shift+[ / ] to Ctrl+PageUp / PageDown (prev/next
+    /// tab), with the trigger Shift consumed (never emitted).
+    #[test]
+    fn every_keymap_maps_cmd_shift_brackets_to_tab_nav() {
+        for keymap in [&GLOBAL, &FILES, &FIREFOX, &GNOME_TERMINAL, &GHOSTTY] {
+            for (in_key, out_key) in [(KEY_LEFTBRACE, KEY_PAGEUP), (KEY_RIGHTBRACE, KEY_PAGEDOWN)] {
+                let mut e = KeymapEngine::new();
+                let out = drive(
+                    &mut e,
+                    keymap,
+                    &[
+                        (LEFTMETA, 1),
+                        (LEFTSHIFT, 1),
+                        (in_key, 1),
+                        (in_key, 0),
+                        (LEFTSHIFT, 0),
+                        (LEFTMETA, 0),
+                    ],
+                );
+                assert_eq!(
+                    out,
+                    vec![
+                        KeyEvent::new(LEFTCTRL, 1),
+                        KeyEvent::new(out_key, 1),
+                        KeyEvent::new(out_key, 0),
+                        KeyEvent::new(LEFTCTRL, 0),
+                    ],
+                    "keymap {} in_key {in_key}",
+                    keymap.id
+                );
+            }
+        }
     }
 
     /// Without Shift, Super+[ is unmapped in the global table and passes the real
