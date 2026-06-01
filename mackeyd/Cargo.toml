@@ -79,6 +79,13 @@ if command -v udevadm >/dev/null 2>&1; then
     udevadm trigger >/dev/null 2>&1 || true
 fi
 
+# Reload the system bus so it picks up our dropped-in dbus policy
+# (app.mackey.conf). Without this the running bus stays unaware of the policy
+# until the next reboot, and the daemon's attempt to own
+# app.mackey.FocusTracker is refused — breaking focus tracking and the per-app
+# keymaps that depend on it. Drop-in files are inert until a reload.
+systemctl reload dbus.service >/dev/null 2>&1 || true
+
 exit 0
 '''
 assets = [
