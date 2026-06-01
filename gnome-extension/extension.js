@@ -16,6 +16,13 @@ const DEST = 'app.mackey.FocusTracker';
 const OBJECT_PATH = '/app/mackey/FocusTracker';
 const IFACE = 'app.mackey.FocusTracker';
 
+// The daemon reverts to the global keymap if no UpdateFocus arrives for >5s
+// (its stale-fallback for a lost focus signal). Focus-change events alone are
+// too sparse to keep it fresh — staying in one window for >5s would trip it —
+// so re-send the current focus on this interval. Must stay well under the
+// daemon's 5s stale window.
+const HEARTBEAT_SECONDS = 2;
+
 export default class MackeyFocusTracker extends Extension {
     enable() {
         this._tracker = Shell.WindowTracker.get_default();
@@ -24,12 +31,25 @@ export default class MackeyFocusTracker extends Extension {
             () => this._onFocusChanged());
         // Push the currently-focused app once on enable.
         this._onFocusChanged();
+        // Re-send the current focus periodically so the daemon's stale-fallback
+        // only fires when this extension is genuinely gone, not during normal
+        // dwell in a single window.
+        this._heartbeat = GLib.timeout_add_seconds(
+            GLib.PRIORITY_DEFAULT, HEARTBEAT_SECONDS,
+            () => {
+                this._onFocusChanged();
+                return GLib.SOURCE_CONTINUE;
+            });
     }
 
     disable() {
         if (this._focusHandler) {
             global.display.disconnect(this._focusHandler);
             this._focusHandler = null;
+        }
+        if (this._heartbeat) {
+            GLib.Source.remove(this._heartbeat);
+            this._heartbeat = null;
         }
         this._tracker = null;
     }
