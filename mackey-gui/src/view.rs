@@ -31,7 +31,10 @@ pub fn screen_for(state: SetupState) -> Screen {
     }
 }
 
-/// The two setup steps, each flagged done/pending from the current state.
+/// The three setup steps, each flagged done/pending from the current state.
+/// Install and enable are separate steps because GNOME on Wayland only loads a
+/// newly installed extension after a re-login, so it cannot be enabled in the
+/// same session it was installed.
 pub fn wizard_steps(state: SetupState) -> Vec<WizardStep> {
     vec![
         WizardStep {
@@ -42,13 +45,20 @@ pub fn wizard_steps(state: SetupState) -> Vec<WizardStep> {
             done: state.service_active,
         },
         WizardStep {
-            title: "Enable the GNOME extension",
-            explanation: "Lets mackey see which application is focused so it can \
-                          apply per-app shortcuts.",
+            title: "Install the GNOME extension",
+            explanation: "Adds the extension that lets mackey see which application \
+                          is focused so it can apply per-app shortcuts.",
             commands: &[
                 "gnome-extensions install /usr/share/mackey/gnome-extension/mackey@mackey.app.shell-extension.zip",
-                "gnome-extensions enable mackey@mackey.app",
             ],
+            done: state.extension_installed,
+        },
+        WizardStep {
+            title: "Log out, log back in, then enable the extension",
+            explanation: "GNOME on Wayland only loads a newly installed extension \
+                          after you log out and back in. Once you're back, run this \
+                          to turn it on.",
+            commands: &["gnome-extensions enable mackey@mackey.app"],
             done: state.extension_enabled,
         },
     ]
@@ -58,39 +68,52 @@ pub fn wizard_steps(state: SetupState) -> Vec<WizardStep> {
 mod tests {
     use super::*;
 
-    fn st(service: bool, extension: bool) -> SetupState {
+    fn st(service: bool, installed: bool, enabled: bool) -> SetupState {
         SetupState {
             service_active: service,
-            extension_enabled: extension,
+            extension_installed: installed,
+            extension_enabled: enabled,
         }
     }
 
     #[test]
     fn incomplete_state_shows_wizard() {
-        assert_eq!(screen_for(st(false, false)), Screen::Wizard);
-        assert_eq!(screen_for(st(true, false)), Screen::Wizard);
-        assert_eq!(screen_for(st(false, true)), Screen::Wizard);
+        assert_eq!(screen_for(st(false, false, false)), Screen::Wizard);
+        assert_eq!(screen_for(st(true, false, false)), Screen::Wizard);
+        // Installed but not yet enabled (post-install, pre-relogin) is incomplete.
+        assert_eq!(screen_for(st(true, true, false)), Screen::Wizard);
     }
 
     #[test]
     fn complete_state_shows_ready() {
-        assert_eq!(screen_for(st(true, true)), Screen::Ready);
+        assert_eq!(screen_for(st(true, true, true)), Screen::Ready);
     }
 
     #[test]
     fn step_done_flags_track_state() {
-        let steps = wizard_steps(st(true, false));
+        let steps = wizard_steps(st(true, false, false));
         assert!(steps[0].done, "service step done when service active");
-        assert!(!steps[1].done, "extension step pending when extension off");
+        assert!(!steps[1].done, "install step pending when not installed");
+        assert!(!steps[2].done, "enable step pending when not enabled");
 
-        let steps = wizard_steps(st(false, true));
+        let steps = wizard_steps(st(false, true, false));
         assert!(!steps[0].done);
-        assert!(steps[1].done);
+        assert!(steps[1].done, "install step done when installed");
+        assert!(!steps[2].done, "enable step still pending until enabled");
+
+        let steps = wizard_steps(st(false, true, true));
+        assert!(steps[2].done, "enable step done when enabled");
     }
 
     #[test]
-    fn extension_step_shows_both_commands() {
-        let steps = wizard_steps(st(false, false));
-        assert_eq!(steps[1].commands.len(), 2);
+    fn wizard_has_three_single_command_steps() {
+        let steps = wizard_steps(st(false, false, false));
+        assert_eq!(steps.len(), 3);
+        assert!(steps.iter().all(|s| s.commands.len() == 1));
+        assert!(steps[1].commands[0].starts_with("gnome-extensions install"));
+        assert_eq!(
+            steps[2].commands[0],
+            "gnome-extensions enable mackey@mackey.app"
+        );
     }
 }

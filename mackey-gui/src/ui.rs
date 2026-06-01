@@ -252,6 +252,7 @@ mod tests {
 
         ui.show_wizard(SetupState {
             service_active: false,
+            extension_installed: false,
             extension_enabled: false,
         });
         assert_eq!(ui.visible_page().as_deref(), Some("wizard"));
