@@ -56,12 +56,12 @@ The global fallback for any app without a dedicated keymap:
 
 ### Firefox
 
-All of the common shortcuts above, plus history navigation:
+All of the common shortcuts above, plus:
 
 | Press | Does |
 | --- | --- |
-| <kbd>⌘</kbd><kbd>←</kbd> | Back |
-| <kbd>⌘</kbd><kbd>→</kbd> | Forward |
+| <kbd>⌘</kbd><kbd>R</kbd> | Reload |
+| <kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd> | Private window |
 
 ### Ghostty
 

@@ -6,9 +6,8 @@
 //!
 //! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
-//! - **Firefox** (`firefox.desktop`) — global, plus Super+R -> Ctrl+R (reload),
-//!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Left/Right ->
-//!   Alt+Left/Right (back/forward).
+//! - **Firefox** (`firefox.desktop`) — global, plus Super+R -> Ctrl+R (reload)
+//!   and Super+Shift+P -> Ctrl+Shift+P (private window).
 //! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults (its
 //!   macOS `super+` bindings rewritten to the Linux bindings): Super+{C,V,A,F,N,
 //!   T,W,Q} -> Ctrl+Shift+{same}; Super+{,/=/-/0/Enter} -> Ctrl+{same};
@@ -314,9 +313,6 @@ static FIREFOX: Keymap = Keymap {
             out_mods: CTRL_SHIFT,
             out_key: KEY_P,
         },
-        // Firefox-specific: history back / forward.
-        key(KEY_LEFT, ALT),
-        key(KEY_RIGHT, ALT),
     ],
 };
 
@@ -1349,23 +1345,29 @@ mod tests {
         assert!(GHOSTTY.binding_for(KEY_UP, NO_MODS).is_none());
     }
 
+    /// Firefox no longer maps Cmd+Left/Right (GNOME's window manager owns those
+    /// for moving windows between workspaces): they're unmapped, so the real
+    /// Super passes through to the desktop.
     #[test]
-    fn firefox_arrows_get_alt() {
-        let mut e = KeymapEngine::new();
-        let out = drive(
-            &mut e,
-            &FIREFOX,
-            &[(LEFTMETA, 1), (KEY_LEFT, 1), (KEY_LEFT, 0), (LEFTMETA, 0)],
-        );
-        assert_eq!(
-            out,
-            vec![
-                KeyEvent::new(LEFTALT, 1),
-                KeyEvent::new(KEY_LEFT, 1),
-                KeyEvent::new(KEY_LEFT, 0),
-                KeyEvent::new(LEFTALT, 0),
-            ]
-        );
+    fn firefox_arrows_are_unmapped_passthrough() {
+        for arrow in [KEY_LEFT, KEY_RIGHT] {
+            let mut e = KeymapEngine::new();
+            let out = drive(
+                &mut e,
+                &FIREFOX,
+                &[(LEFTMETA, 1), (arrow, 1), (arrow, 0), (LEFTMETA, 0)],
+            );
+            assert_eq!(
+                out,
+                vec![
+                    KeyEvent::new(LEFTMETA, 1),
+                    KeyEvent::new(arrow, 1),
+                    KeyEvent::new(arrow, 0),
+                    KeyEvent::new(LEFTMETA, 0),
+                ],
+                "arrow {arrow}"
+            );
+        }
     }
 
     /// Firefox reload: Cmd+R -> Ctrl+R (plain Ctrl, same key).
