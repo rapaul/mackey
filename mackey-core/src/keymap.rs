@@ -4,7 +4,8 @@
 //! their Linux equivalents. The exact rewrite depends on the **active keymap**,
 //! which the daemon selects from the focused app (M8):
 //!
-//! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
+//! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}, plus
+//!   Super+Shift+[ / ] -> Ctrl+PageUp / PageDown (prev/next tab).
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
 //! - **Firefox** (`firefox.desktop`) — global, plus Super+Left/Right ->
 //!   Alt+Left/Right (back/forward).
@@ -66,6 +67,8 @@ const KEY_UP: u16 = KeyCode::KEY_UP.code();
 const KEY_DOWN: u16 = KeyCode::KEY_DOWN.code();
 const KEY_LEFTBRACE: u16 = KeyCode::KEY_LEFTBRACE.code();
 const KEY_RIGHTBRACE: u16 = KeyCode::KEY_RIGHTBRACE.code();
+const KEY_PAGEUP: u16 = KeyCode::KEY_PAGEUP.code();
+const KEY_PAGEDOWN: u16 = KeyCode::KEY_PAGEDOWN.code();
 
 // Ghostty-specific keys (font size, config, fullscreen, tab navigation).
 const KEY_COMMA: u16 = KeyCode::KEY_COMMA.code();
@@ -238,6 +241,19 @@ static GLOBAL: Keymap = Keymap {
         key(KEY_W, CTRL),
         key(KEY_Q, CTRL),
         key(KEY_T, CTRL),
+        // Tab navigation: Cmd+Shift+[ / ] -> Ctrl+PageUp / PageDown (prev/next tab).
+        Binding {
+            in_key: KEY_LEFTBRACE,
+            in_mods: SHIFT_IN,
+            out_mods: CTRL,
+            out_key: KEY_PAGEUP,
+        },
+        Binding {
+            in_key: KEY_RIGHTBRACE,
+            in_mods: SHIFT_IN,
+            out_mods: CTRL,
+            out_key: KEY_PAGEDOWN,
+        },
     ],
 };
 
@@ -766,7 +782,9 @@ mod tests {
 
     #[test]
     fn every_global_letter_is_rewritten_to_ctrl() {
-        for b in GLOBAL.bindings {
+        // The plain same-key letter bindings (Super+X -> Ctrl+X). The Super+Shift+[/]
+        // tab-nav bindings carry an input modifier and are covered separately.
+        for b in GLOBAL.bindings.iter().filter(|b| b.in_mods == NO_MODS) {
             let k = b.in_key;
             let mut e = KeymapEngine::new();
             let out = drive(
@@ -826,6 +844,85 @@ mod tests {
         );
         assert_eq!(out.first(), Some(&KeyEvent::new(LEFTCTRL, 1)));
         assert_eq!(out.last(), Some(&KeyEvent::new(LEFTCTRL, 0)));
+    }
+
+    #[test]
+    fn global_cmd_shift_leftbracket_is_ctrl_pageup() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GLOBAL,
+            &[
+                (LEFTMETA, 1),
+                (LEFTSHIFT, 1),
+                (KEY_LEFTBRACE, 1),
+                (KEY_LEFTBRACE, 0),
+                (LEFTSHIFT, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        // The trigger Shift is consumed by the binding, never emitted: clean Ctrl+PageUp.
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(KEY_PAGEUP, 1),
+                KeyEvent::new(KEY_PAGEUP, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn global_cmd_shift_rightbracket_is_ctrl_pagedown() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GLOBAL,
+            &[
+                (LEFTMETA, 1),
+                (LEFTSHIFT, 1),
+                (KEY_RIGHTBRACE, 1),
+                (KEY_RIGHTBRACE, 0),
+                (LEFTSHIFT, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(KEY_PAGEDOWN, 1),
+                KeyEvent::new(KEY_PAGEDOWN, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Without Shift, Super+[ is unmapped in the global table and passes the real
+    /// Super through (it must not steal the bracket for tab nav).
+    #[test]
+    fn global_cmd_leftbracket_without_shift_passes_super() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GLOBAL,
+            &[
+                (LEFTMETA, 1),
+                (KEY_LEFTBRACE, 1),
+                (KEY_LEFTBRACE, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTMETA, 1),
+                KeyEvent::new(KEY_LEFTBRACE, 1),
+                KeyEvent::new(KEY_LEFTBRACE, 0),
+                KeyEvent::new(LEFTMETA, 0),
+            ]
+        );
     }
 
     /// Property: with Super never held, every key event is passed through
