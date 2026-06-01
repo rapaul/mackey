@@ -8,9 +8,12 @@
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
 //! - **Firefox** (`firefox.desktop`) — global, plus Super+Left/Right ->
 //!   Alt+Left/Right (back/forward).
-//! - **Ghostty** (`com.mitchellh.ghostty.desktop`) and **GNOME Terminal**
-//!   (`org.gnome.Terminal.desktop`) — terminal convention: Super+{C,V,X,T,W,N}
-//!   -> Ctrl+Shift+{same}; the rest map to Ctrl+{same}.
+//! - **GNOME Terminal** (`org.gnome.Terminal.desktop`) — terminal convention:
+//!   Super+{C,V,X,T,W,N} -> Ctrl+Shift+{same}; the rest map to Ctrl+{same}.
+//! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults
+//!   (its macOS `super+` bindings rewritten to the Linux bindings, same key):
+//!   Super+{C,V,A,F,N,T,W,Q} -> Ctrl+Shift+{same}; Super+{,/=/-/0/Enter} ->
+//!   Ctrl+{same}; Super+{1..9} -> Alt+{same} (tab navigation).
 //!
 //! In every keymap, anything not in the active table passes through untouched:
 //! a key with Super *not* held, a lone Super tap (emitted on release so GNOME's
@@ -44,6 +47,22 @@ const KEY_T: u16 = KeyCode::KEY_T.code();
 const KEY_LEFT: u16 = KeyCode::KEY_LEFT.code();
 const KEY_RIGHT: u16 = KeyCode::KEY_RIGHT.code();
 const KEY_UP: u16 = KeyCode::KEY_UP.code();
+
+// Ghostty-specific keys (font size, config, fullscreen, tab navigation).
+const KEY_COMMA: u16 = KeyCode::KEY_COMMA.code();
+const KEY_MINUS: u16 = KeyCode::KEY_MINUS.code();
+const KEY_EQUAL: u16 = KeyCode::KEY_EQUAL.code();
+const KEY_ENTER: u16 = KeyCode::KEY_ENTER.code();
+const KEY_0: u16 = KeyCode::KEY_0.code();
+const KEY_1: u16 = KeyCode::KEY_1.code();
+const KEY_2: u16 = KeyCode::KEY_2.code();
+const KEY_3: u16 = KeyCode::KEY_3.code();
+const KEY_4: u16 = KeyCode::KEY_4.code();
+const KEY_5: u16 = KeyCode::KEY_5.code();
+const KEY_6: u16 = KeyCode::KEY_6.code();
+const KEY_7: u16 = KeyCode::KEY_7.code();
+const KEY_8: u16 = KeyCode::KEY_8.code();
+const KEY_9: u16 = KeyCode::KEY_9.code();
 
 // Modifier sets a binding can request, held while the mapped key is emitted.
 const CTRL: &[u16] = &[LEFTCTRL];
@@ -148,9 +167,50 @@ const TERMINAL_ENTRIES: &[(u16, &[u16])] = &[
     (KEY_Q, CTRL),
 ];
 
+// Ghostty's own defaults, derived from `src/config/Config.zig` (the macOS
+// `super+` bindings) cross-referenced with `ghostty +list-keybinds --default`
+// (the Linux bindings). Each entry rewrites Ghostty's macOS shortcut to its
+// Linux equivalent on the *same* physical key:
+//
+//   super+{c,v,a,f,n,t,w,q} -> ctrl+shift+{same}   (copy/paste/select-all/
+//                                                    search/window/tab/quit)
+//   super+{comma,=,-,0,enter} -> ctrl+{same}        (config/font-size/fullscreen)
+//   super+{1..9} -> alt+{same}                       (goto_tab / last_tab)
+//
+// Ghostty binds no super shortcut to S/Z/X/O on macOS, so those are absent here
+// (they pass the real Super through rather than injecting Ctrl+S/Z into the
+// shell). Bindings whose macOS trigger carries an extra input modifier
+// (super+shift+p command palette, super+shift+enter zoom, alt+super+i inspector)
+// or that remap the key itself (super+d new-split -> ctrl+shift+o) can't be
+// expressed by the same-key engine and are intentionally omitted.
+const GHOSTTY_ENTRIES: &[(u16, &[u16])] = &[
+    (KEY_C, CTRL_SHIFT),
+    (KEY_V, CTRL_SHIFT),
+    (KEY_A, CTRL_SHIFT),
+    (KEY_F, CTRL_SHIFT),
+    (KEY_N, CTRL_SHIFT),
+    (KEY_T, CTRL_SHIFT),
+    (KEY_W, CTRL_SHIFT),
+    (KEY_Q, CTRL_SHIFT),
+    (KEY_COMMA, CTRL),
+    (KEY_EQUAL, CTRL),
+    (KEY_MINUS, CTRL),
+    (KEY_0, CTRL),
+    (KEY_ENTER, CTRL),
+    (KEY_1, ALT),
+    (KEY_2, ALT),
+    (KEY_3, ALT),
+    (KEY_4, ALT),
+    (KEY_5, ALT),
+    (KEY_6, ALT),
+    (KEY_7, ALT),
+    (KEY_8, ALT),
+    (KEY_9, ALT),
+];
+
 static GHOSTTY: Keymap = Keymap {
     id: "com.mitchellh.ghostty.desktop",
-    entries: TERMINAL_ENTRIES,
+    entries: GHOSTTY_ENTRIES,
 };
 
 static GNOME_TERMINAL: Keymap = Keymap {
@@ -479,8 +539,10 @@ mod tests {
         );
     }
 
+    /// Ghostty select-all is Cmd+A on macOS -> Ctrl+Shift+A on Linux (unlike the
+    /// generic global table, where Super+A is plain Ctrl+A).
     #[test]
-    fn ghostty_non_shifted_letter_stays_plain_ctrl() {
+    fn ghostty_select_all_gets_ctrl_shift() {
         let mut e = KeymapEngine::new();
         let out = drive(
             &mut e,
@@ -491,9 +553,72 @@ mod tests {
             out,
             vec![
                 KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTSHIFT, 1),
                 KeyEvent::new(KEY_A, 1),
                 KeyEvent::new(KEY_A, 0),
+                KeyEvent::new(LEFTSHIFT, 0),
                 KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Ghostty open-config (Cmd+, -> Ctrl+,) keeps plain Ctrl, no Shift.
+    #[test]
+    fn ghostty_open_config_gets_plain_ctrl() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GHOSTTY,
+            &[(LEFTMETA, 1), (KEY_COMMA, 1), (KEY_COMMA, 0), (LEFTMETA, 0)],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(KEY_COMMA, 1),
+                KeyEvent::new(KEY_COMMA, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Ghostty goto-tab (Cmd+1 -> Alt+1 on Linux) rewrites Super to Alt.
+    #[test]
+    fn ghostty_goto_tab_gets_alt() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GHOSTTY,
+            &[(LEFTMETA, 1), (KEY_1, 1), (KEY_1, 0), (LEFTMETA, 0)],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTALT, 1),
+                KeyEvent::new(KEY_1, 1),
+                KeyEvent::new(KEY_1, 0),
+                KeyEvent::new(LEFTALT, 0),
+            ]
+        );
+    }
+
+    /// Ghostty binds no super shortcut to S on macOS (Ctrl+S would freeze the
+    /// terminal), so Super+S is unmapped and the real Super passes through.
+    #[test]
+    fn ghostty_super_s_is_unmapped_passthrough() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GHOSTTY,
+            &[(LEFTMETA, 1), (KEY_S, 1), (KEY_S, 0), (LEFTMETA, 0)],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTMETA, 1),
+                KeyEvent::new(KEY_S, 1),
+                KeyEvent::new(KEY_S, 0),
+                KeyEvent::new(LEFTMETA, 0),
             ]
         );
     }
@@ -519,10 +644,13 @@ mod tests {
         );
     }
 
-    /// Both terminals share the same convention table.
+    /// Ghostty quit is Cmd+Q -> Ctrl+Shift+Q on Linux, whereas GNOME Terminal
+    /// follows the generic terminal convention (plain Ctrl+Q). They no longer
+    /// share one table.
     #[test]
-    fn gnome_terminal_matches_ghostty_convention() {
-        assert_eq!(GNOME_TERMINAL.entries, GHOSTTY.entries);
+    fn ghostty_and_gnome_terminal_differ_on_quit() {
+        assert_eq!(GHOSTTY.mods_for(KEY_Q), Some(CTRL_SHIFT));
+        assert_eq!(GNOME_TERMINAL.mods_for(KEY_Q), Some(CTRL));
     }
 
     #[test]

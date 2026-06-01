@@ -87,7 +87,8 @@ Keymaps are compiled into the daemon — there is no config file, no `~/.config/
 - **Global fallback** — applies when no app-specific keymap matches. Wires the common Super+`<letter>` shortcuts (C, V, X, A, Z, S, F, N, O, W, Q, T) to their Ctrl equivalents.
 - **Files** (`org.gnome.Nautilus.desktop`)
 - **Firefox** (`firefox.desktop`)
-- **Ghostty** (`com.mitchellh.ghostty.desktop`) and **GNOME Terminal** (`org.gnome.Terminal.desktop`) — terminal convention: Super+{C,V,X,T,W,N} -> Ctrl+Shift+{same}, the rest -> Ctrl+{same}
+- **GNOME Terminal** (`org.gnome.Terminal.desktop`) — terminal convention: Super+{C,V,X,T,W,N} -> Ctrl+Shift+{same}, the rest -> Ctrl+{same}
+- **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults, derived from `src/config/Config.zig` (the macOS `super+` bindings) against `ghostty +list-keybinds --default` (Linux): Super+{C,V,A,F,N,T,W,Q} -> Ctrl+Shift+{same}; Super+{`,`/`=`/`-`/0/Enter} -> Ctrl+{same}; Super+{1..9} -> Alt+{same} (tab navigation). Bindings whose macOS trigger carries an extra input modifier (super+shift+p, alt+super+i) or remaps the key (super+d new-split) can't be expressed by the same-key engine and are omitted.
 
 Bindings are pure key-event → key-event mappings; there is no syntax for executing commands or shell. A future v0.2 will introduce a user-editable TOML config; the MVP keeps the surface deliberately small so the install footprint, the threat model, and the daemon's userland data dependencies stay simple.
 
