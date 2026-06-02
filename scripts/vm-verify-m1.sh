@@ -31,7 +31,7 @@ echo "--- mackeyd output ---"; echo "$out"; echo "----------------------"
 
 fail=0
 if [ "$rc" -ne 0 ]; then echo "FAIL: mackeyd exit code $rc (want 0)" >&2; fail=1; fi
-if ! grep -q "mackeyd v0.4.0 starting" <<<"$out"; then
+if ! grep -q "mackeyd v0.5.0 starting" <<<"$out"; then
     echo "FAIL: startup line not found in output" >&2; fail=1
 fi
 
