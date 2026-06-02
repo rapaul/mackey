@@ -34,6 +34,10 @@
 //! Super(+mods) + any *unmapped* key (the real Super, plus any held modifiers, is
 //! emitted so e.g. Super+L still reaches the desktop).
 //!
+//! One key is special across every keymap: Caps Lock is swallowed entirely
+//! (press, release, and autorepeat all emit nothing), so it does nothing in any
+//! app.
+//!
 //! The engine is a pure state machine over `(code, value)` key events plus an
 //! active [`Keymap`], so it can be exhaustively unit-tested without a kernel.
 
@@ -73,6 +77,9 @@ const KEY_LEFTBRACE: u16 = KeyCode::KEY_LEFTBRACE.code();
 const KEY_RIGHTBRACE: u16 = KeyCode::KEY_RIGHTBRACE.code();
 const KEY_PAGEUP: u16 = KeyCode::KEY_PAGEUP.code();
 const KEY_PAGEDOWN: u16 = KeyCode::KEY_PAGEDOWN.code();
+
+// Caps Lock is swallowed entirely (never emitted) so it does nothing in any app.
+const KEY_CAPSLOCK: u16 = KeyCode::KEY_CAPSLOCK.code();
 
 // Ghostty-specific keys (font size, config, fullscreen, tab navigation).
 const KEY_COMMA: u16 = KeyCode::KEY_COMMA.code();
@@ -560,6 +567,10 @@ impl KeymapEngine {
 
     /// Translate one EV_KEY event into the events to emit, under `keymap`.
     pub fn process(&mut self, code: u16, value: i32, keymap: &Keymap) -> Vec<KeyEvent> {
+        // Caps Lock does nothing, in every app: drop press, release, and repeat.
+        if code == KEY_CAPSLOCK {
+            return Vec::new();
+        }
         if is_meta(code) {
             return self.process_meta(code, value);
         }
@@ -975,13 +986,42 @@ mod tests {
     fn no_super_is_identity_passthrough() {
         let mut e = KeymapEngine::new();
         for code in 1u16..256 {
-            if is_meta(code) {
+            if is_meta(code) || code == KEY_CAPSLOCK {
                 continue;
             }
             for value in [1, 2, 0] {
                 let out = e.process(code, value, &GLOBAL);
                 assert_eq!(out, vec![KeyEvent::new(code, value)]);
             }
+        }
+    }
+
+    /// Caps Lock is swallowed in every app and for every event value: it emits
+    /// nothing, whether or not Super is held.
+    #[test]
+    fn capslock_does_nothing() {
+        for keymap in [&GLOBAL, &FILES, &FIREFOX, &GHOSTTY] {
+            let mut e = KeymapEngine::new();
+            // Press, autorepeat, and release all produce no output.
+            for value in [PRESS, 2, RELEASE] {
+                assert!(e.process(KEY_CAPSLOCK, value, keymap).is_empty());
+            }
+            // Even with Super held, Caps Lock stays inert and doesn't disturb the
+            // Super-hold: a following mapped key still rewrites normally.
+            let out = drive(
+                &mut e,
+                keymap,
+                &[
+                    (LEFTMETA, 1),
+                    (KEY_CAPSLOCK, 1),
+                    (KEY_CAPSLOCK, 0),
+                    (KEY_C, 1),
+                    (KEY_C, 0),
+                    (LEFTMETA, 0),
+                ],
+            );
+            assert!(!out.iter().any(|ev| ev.code == KEY_CAPSLOCK));
+            assert!(out.contains(&KeyEvent::new(KEY_C, 1)));
         }
     }
 
