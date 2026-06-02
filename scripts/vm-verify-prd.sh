@@ -42,6 +42,21 @@ inject() { # $1 = python injector path in repo, $2... = args
     local b64; b64="$(base64 -w0 "$script")"
     r "echo $b64 | base64 -d >/tmp/inj.py && sudo python3 /tmp/inj.py $*" 2>&1 || true
 }
+uid=""  # tester's uid, set after install; needed to reach the graphical session bus
+# Restart gdm and wait for tester's autologin session (user bus + gnome-shell) so
+# the freshly-installed system-wide extension is discovered by the shell. A
+# mid-session install isn't picked up by the running Wayland shell otherwise.
+restart_session() {
+    r 'sudo systemctl restart gdm' >/dev/null 2>&1 || true
+    for _ in $(seq 1 60); do
+        [ "$(r "test -S /run/user/$uid/bus && pgrep -u tester -x gnome-shell >/dev/null && echo up || echo no" | tr -d '[:space:]')" = up ] \
+            && { sleep 3; return 0; }
+        sleep 2
+    done
+    return 1
+}
+# gnome-extensions must talk to tester's graphical session bus, not ssh's env.
+gnome_ext() { r "XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus gnome-extensions $*"; }
 
 echo "############ [$distro] PRD verification ############"
 "$vmtest" "$distro" snapshot reset
@@ -51,6 +66,7 @@ echo "== 1. clean install enables+starts the service without touching the login 
 "$vmtest" "$distro" install "$pkg"
 groups_after="$(r 'id -nG tester')"
 r "$install_evdev" >/dev/null 2>&1
+uid="$(r 'id -u tester' | tr -d '[:space:]')"
 check "mackey user created" "$(r 'getent passwd mackey >/dev/null && echo yes || echo no')" "yes"
 check "service auto-enabled" "$(r 'systemctl is-enabled mackey.service 2>/dev/null || echo disabled')" "enabled"
 check "service auto-started" "$(r 'systemctl is-active mackey.service 2>/dev/null || echo inactive')" "active"
@@ -58,10 +74,11 @@ check "extension installed system-wide" "$(r "test -f '$ext_dir/metadata.json' &
 check "groups unchanged by install" "$groups_before" "$groups_after"
 
 echo "== 2. wizard extension item flips to done within 5s of the user enabling it =="
-r 'gnome-extensions enable mackey@mackey.app' >/dev/null 2>&1 || true
+restart_session || note "WARN: tester session did not return after gdm restart"
+gnome_ext 'enable mackey@mackey.app' >/dev/null 2>&1 || true
 sleep 5
 check "extension item -> done" \
-    "$(r 'gnome-extensions list --enabled 2>/dev/null | grep -qx mackey@mackey.app && echo yes || echo no')" "yes"
+    "$(gnome_ext 'list --enabled 2>/dev/null | grep -qx mackey@mackey.app && echo yes || echo no')" "yes"
 
 echo "== 3. Super+C / Super+T remap per focused app; groups still unchanged =="
 set_focus firefox.desktop
