@@ -98,6 +98,10 @@ All of the common shortcuts above, plus:
 | --- | --- |
 | <kbd>⌘</kbd><kbd>↑</kbd> | Go to parent folder |
 
+## Adding new app/key mappings
+
+Adding new apps, maintain a fork and build packages for your system.
+
 ## License
 
 [MIT](LICENSE)
