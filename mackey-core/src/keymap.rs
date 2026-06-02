@@ -6,7 +6,8 @@
 //!
 //! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
-//! - **Firefox** (`firefox.desktop`) — global, plus Super+R -> Ctrl+R (reload),
+//! - **Firefox** (`firefox.desktop` / `org.mozilla.firefox.desktop`) — global,
+//!   plus Super+R -> Ctrl+R (reload),
 //!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Shift+T ->
 //!   Ctrl+Shift+T (reopen closed tab).
 //! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults (its
@@ -480,7 +481,9 @@ static GHOSTTY: Keymap = Keymap {
 fn keymap_for(app_id: Option<&str>) -> &'static Keymap {
     match app_id {
         Some("org.gnome.Nautilus.desktop") => &FILES,
-        Some("firefox.desktop") => &FIREFOX,
+        // Distro Firefox is "firefox.desktop"; modern Fedora and the Flatpak
+        // ship it as "org.mozilla.firefox.desktop".
+        Some("firefox.desktop") | Some("org.mozilla.firefox.desktop") => &FIREFOX,
         Some("com.mitchellh.ghostty.desktop") => &GHOSTTY,
         _ => &GLOBAL,
     }
@@ -1480,6 +1483,11 @@ mod tests {
     #[test]
     fn keymap_for_resolves_known_apps_else_global() {
         assert_eq!(keymap_for(Some("firefox.desktop")).id, "firefox.desktop");
+        // Modern Fedora/Flatpak ship Firefox as org.mozilla.firefox.desktop.
+        assert_eq!(
+            keymap_for(Some("org.mozilla.firefox.desktop")).id,
+            "firefox.desktop"
+        );
         assert_eq!(
             keymap_for(Some("org.gnome.Nautilus.desktop")).id,
             "org.gnome.Nautilus.desktop"
