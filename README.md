@@ -7,6 +7,8 @@ focused on.
 
 **Supported platform: GNOME on Wayland only.** X11, KDE, and Sway are out of scope.
 
+Inspired by [Toshy](https://github.com/RedBearAK/toshy)
+
 ## Installation
 
 mackey ships as a `.deb` / `.rpm`. There is no hosted CI — build the package
