@@ -64,6 +64,7 @@ All of the common shortcuts above, plus:
 | --- | --- |
 | <kbd>⌘</kbd><kbd>R</kbd> | Reload |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd> | Private window |
+| <kbd>⌘</kbd><kbd>⇧</kbd><kbd>T</kbd> | Reopen closed tab |
 
 ### Ghostty
 

@@ -6,8 +6,9 @@
 //!
 //! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
-//! - **Firefox** (`firefox.desktop`) — global, plus Super+R -> Ctrl+R (reload)
-//!   and Super+Shift+P -> Ctrl+Shift+P (private window).
+//! - **Firefox** (`firefox.desktop`) — global, plus Super+R -> Ctrl+R (reload),
+//!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Shift+T ->
+//!   Ctrl+Shift+T (reopen closed tab).
 //! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults (its
 //!   macOS `super+` bindings rewritten to the Linux bindings): Super+{C,V,A,F,N,
 //!   T,W,Q} -> Ctrl+Shift+{same}; Super+{,/=/-/0/Enter} -> Ctrl+{same};
@@ -304,14 +305,21 @@ static FIREFOX: Keymap = Keymap {
         key(KEY_T, CTRL),
         TAB_PREV,
         TAB_NEXT,
-        // Firefox-specific: reload (Cmd+R -> Ctrl+R) and the private-window /
-        // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P).
+        // Firefox-specific: reload (Cmd+R -> Ctrl+R), the private-window /
+        // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P), and reopen the last
+        // closed tab (Cmd+Shift+T -> Ctrl+Shift+T).
         key(KEY_R, CTRL),
         Binding {
             in_key: KEY_P,
             in_mods: SHIFT_IN,
             out_mods: CTRL_SHIFT,
             out_key: KEY_P,
+        },
+        Binding {
+            in_key: KEY_T,
+            in_mods: SHIFT_IN,
+            out_mods: CTRL_SHIFT,
+            out_key: KEY_T,
         },
     ],
 };
@@ -1414,6 +1422,36 @@ mod tests {
                 KeyEvent::new(LEFTSHIFT, 1),
                 KeyEvent::new(KEY_P, 1),
                 KeyEvent::new(KEY_P, 0),
+                KeyEvent::new(LEFTSHIFT, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Firefox reopen-closed-tab: Cmd+Shift+T -> Ctrl+Shift+T. The trigger Shift
+    /// is an input modifier; the Ctrl+Shift output comes from the binding.
+    #[test]
+    fn firefox_shift_t_gets_ctrl_shift_t() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &FIREFOX,
+            &[
+                (LEFTMETA, 1),
+                (LEFTSHIFT, 1),
+                (KEY_T, 1),
+                (KEY_T, 0),
+                (LEFTSHIFT, 0),
+                (LEFTMETA, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTSHIFT, 1),
+                KeyEvent::new(KEY_T, 1),
+                KeyEvent::new(KEY_T, 0),
                 KeyEvent::new(LEFTSHIFT, 0),
                 KeyEvent::new(LEFTCTRL, 0),
             ]
