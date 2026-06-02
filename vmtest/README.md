@@ -59,6 +59,6 @@ cloud-init) and is slow (10–30 min). Subsequent boots are fast.
 ## M2 scenario
 
 `scripts/vm-verify-m1.sh <distro>` installs the M1 package, runs `mackeyd` once,
-asserts it prints `mackeyd v0.3.0 starting` and exits 0, then resets the VM.
+asserts it prints `mackeyd v0.4.0 starting` and exits 0, then resets the VM.
 This is the M2 deliverable: a clean install of the hello-world package on both
 distros.

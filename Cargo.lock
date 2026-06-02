@@ -834,7 +834,7 @@ checksum = "616ec5685824bcc94416c6d4a7a446eea774a31efd7062c8480ba6fd06d7a6e5"
 
 [[package]]
 name = "mackey-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "evdev",
  "serde",
@@ -843,7 +843,7 @@ dependencies = [
 
 [[package]]
 name = "mackey-gui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "gtk4",
  "libadwaita",
@@ -852,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "mackeyd"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "evdev",
  "inotify",
