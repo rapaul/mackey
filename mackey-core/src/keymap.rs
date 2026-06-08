@@ -4,11 +4,11 @@
 //! their Linux equivalents. The exact rewrite depends on the **active keymap**,
 //! which the daemon selects from the focused app (M8):
 //!
-//! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
+//! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}, plus
+//!   Super+Left/Right -> Alt+Left/Right (back/forward).
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
 //! - **Firefox** (`firefox.desktop` / `org.mozilla.firefox.desktop`) — global,
-//!   plus Super+Left/Right -> Alt+Left/Right (back/forward),
-//!   Super+R -> Ctrl+R (reload),
+//!   plus Super+R -> Ctrl+R (reload),
 //!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Shift+T ->
 //!   Ctrl+Shift+T (reopen closed tab).
 //! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults (its
@@ -22,7 +22,9 @@
 //!
 //! Every keymap above also carries the shared tab-navigation pair: Super+Shift+[
 //! / ] -> Ctrl+PageUp / PageDown (prev/next tab) — for Ghostty this is
-//! previous_tab/next_tab, distinct from goto_split's Super+[ / ].
+//! previous_tab/next_tab, distinct from goto_split's Super+[ / ]. Every keymap
+//! except Ghostty (a terminal, with no history nav) also carries back/forward:
+//! Super+Left / Right -> Alt+Left / Right.
 //!
 //! A binding may therefore differ from the global "same key" rule in two ways: it
 //! can require extra **input modifiers** (Shift/Ctrl/Alt) as part of the trigger —
@@ -255,6 +257,13 @@ const TAB_NEXT: Binding = Binding {
     out_key: KEY_PAGEDOWN,
 };
 
+// History navigation: Cmd+Left / Cmd+Right -> Alt+Left / Alt+Right, the standard
+// GTK/GNOME back/forward shortcut. Without these, Super+Arrow falls through to
+// GNOME's window snapping. Wired into the global fallback and most app keymaps;
+// terminals (Ghostty) have no history nav, so they omit it.
+const NAV_BACK: Binding = key(KEY_LEFT, ALT);
+const NAV_FORWARD: Binding = key(KEY_RIGHT, ALT);
+
 static GLOBAL: Keymap = Keymap {
     id: "global",
     bindings: &[
@@ -272,6 +281,8 @@ static GLOBAL: Keymap = Keymap {
         key(KEY_T, CTRL),
         TAB_PREV,
         TAB_NEXT,
+        NAV_BACK,
+        NAV_FORWARD,
     ],
 };
 
@@ -292,6 +303,8 @@ static FILES: Keymap = Keymap {
         key(KEY_T, CTRL),
         TAB_PREV,
         TAB_NEXT,
+        NAV_BACK,
+        NAV_FORWARD,
         // Files-specific: go to the parent directory.
         key(KEY_UP, ALT),
     ],
@@ -314,11 +327,8 @@ static FIREFOX: Keymap = Keymap {
         key(KEY_T, CTRL),
         TAB_PREV,
         TAB_NEXT,
-        // Back / forward: Cmd+Left -> Alt+Left, Cmd+Right -> Alt+Right. Without
-        // these, Super+Arrow would pass through to GNOME's window snapping instead
-        // of navigating history.
-        key(KEY_LEFT, ALT),
-        key(KEY_RIGHT, ALT),
+        NAV_BACK,
+        NAV_FORWARD,
         // Firefox-specific: reload (Cmd+R -> Ctrl+R), the private-window /
         // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P), and reopen the last
         // closed tab (Cmd+Shift+T -> Ctrl+Shift+T).
@@ -810,8 +820,13 @@ mod tests {
     #[test]
     fn every_global_letter_is_rewritten_to_ctrl() {
         // The plain same-key letter bindings (Super+X -> Ctrl+X). The Super+Shift+[/]
-        // tab-nav bindings carry an input modifier and are covered separately.
-        for b in GLOBAL.bindings.iter().filter(|b| b.in_mods == NO_MODS) {
+        // tab-nav bindings carry an input modifier, and the back/forward arrows emit
+        // Alt rather than Ctrl; both are covered separately.
+        for b in GLOBAL
+            .bindings
+            .iter()
+            .filter(|b| b.in_mods == NO_MODS && b.out_mods == CTRL)
+        {
             let k = b.in_key;
             let mut e = KeymapEngine::new();
             let out = drive(
@@ -828,6 +843,31 @@ mod tests {
                     KeyEvent::new(LEFTCTRL, 0),
                 ],
                 "mapping for key code {k}"
+            );
+        }
+    }
+
+    /// Global back/forward: Cmd+Left -> Alt+Left, Cmd+Right -> Alt+Right, so the
+    /// arrows navigate history instead of falling through to GNOME's window
+    /// snapping. The default in every app keymap except the terminal.
+    #[test]
+    fn global_arrows_are_back_forward() {
+        for arrow in [KEY_LEFT, KEY_RIGHT] {
+            let mut e = KeymapEngine::new();
+            let out = drive(
+                &mut e,
+                &GLOBAL,
+                &[(LEFTMETA, 1), (arrow, 1), (arrow, 0), (LEFTMETA, 0)],
+            );
+            assert_eq!(
+                out,
+                vec![
+                    KeyEvent::new(LEFTALT, 1),
+                    KeyEvent::new(arrow, 1),
+                    KeyEvent::new(arrow, 0),
+                    KeyEvent::new(LEFTALT, 0),
+                ],
+                "arrow {arrow}"
             );
         }
     }
