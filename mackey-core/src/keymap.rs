@@ -601,6 +601,20 @@ impl KeymapEngine {
     /// the output key and record the remap for release/autorepeat.
     fn emit_mapped(&mut self, code: u16, b: Binding) -> Vec<KeyEvent> {
         let mut out = Vec::new();
+        // A trigger modifier physically pressed *before* Super was emitted (it
+        // leaked through, so it isn't in held_mods). If this binding consumes it
+        // — its out_mods doesn't want it — release it now and swallow its
+        // eventual physical release, so e.g. Shift-then-Cmd+[ still emits a clean
+        // Ctrl+PageUp (switch tab) and not Ctrl+Shift+PageUp (reorder tab).
+        for m in [Mod::Shift, Mod::Ctrl, Mod::Alt] {
+            if self.phys.get(m) && !self.suppressed.get(m) {
+                let mod_code = self.phys_code[m.idx()];
+                if !b.out_mods.contains(&mod_code) {
+                    out.push(KeyEvent::new(mod_code, RELEASE));
+                    self.suppressed.set(m, true);
+                }
+            }
+        }
         let mut i = 0;
         while i < self.held_mods.len() {
             let held = self.held_mods[i];
@@ -969,6 +983,43 @@ mod tests {
                         KeyEvent::new(LEFTCTRL, 0),
                     ],
                     "keymap {} in_key {in_key}",
+                    keymap.id
+                );
+            }
+        }
+    }
+
+    /// Tab nav with Shift pressed *before* Cmd must still emit a clean
+    /// Ctrl+PageUp/PageDown — the trigger Shift is consumed even though it was
+    /// physically down before Super, so Firefox switches tabs rather than
+    /// reordering them (Ctrl+Shift+PageUp moves a tab).
+    #[test]
+    fn tab_nav_with_shift_before_super_consumes_shift() {
+        for keymap in [&GLOBAL, &FIREFOX, &GHOSTTY] {
+            for (in_key, out_key) in [(KEY_LEFTBRACE, KEY_PAGEUP), (KEY_RIGHTBRACE, KEY_PAGEDOWN)] {
+                let mut e = KeymapEngine::new();
+                let out = drive(
+                    &mut e,
+                    keymap,
+                    &[
+                        (LEFTSHIFT, 1),
+                        (LEFTMETA, 1),
+                        (in_key, 1),
+                        (in_key, 0),
+                        (LEFTMETA, 0),
+                        (LEFTSHIFT, 0),
+                    ],
+                );
+                // Whatever the press ordering, no Shift may be held while the
+                // PageUp/PageDown is emitted.
+                let shift_down_at_outkey = out
+                    .iter()
+                    .take_while(|ev| !(ev.code == out_key && ev.value == PRESS))
+                    .filter(|ev| ev.code == LEFTSHIFT || ev.code == RIGHTSHIFT)
+                    .fold(false, |_, ev| ev.value == PRESS);
+                assert!(
+                    !shift_down_at_outkey,
+                    "keymap {} in_key {in_key}: Shift leaked into tab nav: {out:?}",
                     keymap.id
                 );
             }
