@@ -5,8 +5,8 @@
 //! which the daemon selects from the focused app (M8):
 //!
 //! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}, plus
-//!   Super+Left/Right -> Alt+Left/Right (back/forward).
-//! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
+//!   Super+Left/Right -> Alt+Left/Right (back/forward). Files (Nautilus) uses this
+//!   fallback as-is.
 //! - **Firefox** (`firefox.desktop` / `org.mozilla.firefox.desktop`) — global,
 //!   plus Super+R -> Ctrl+R (reload),
 //!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Shift+T ->
@@ -286,30 +286,6 @@ static GLOBAL: Keymap = Keymap {
     ],
 };
 
-static FILES: Keymap = Keymap {
-    id: "org.gnome.Nautilus.desktop",
-    bindings: &[
-        key(KEY_C, CTRL),
-        key(KEY_V, CTRL),
-        key(KEY_X, CTRL),
-        key(KEY_A, CTRL),
-        key(KEY_Z, CTRL),
-        key(KEY_S, CTRL),
-        key(KEY_F, CTRL),
-        key(KEY_N, CTRL),
-        key(KEY_O, CTRL),
-        key(KEY_W, CTRL),
-        key(KEY_Q, CTRL),
-        key(KEY_T, CTRL),
-        TAB_PREV,
-        TAB_NEXT,
-        NAV_BACK,
-        NAV_FORWARD,
-        // Files-specific: go to the parent directory.
-        key(KEY_UP, ALT),
-    ],
-};
-
 static FIREFOX: Keymap = Keymap {
     id: "firefox.desktop",
     bindings: &[
@@ -503,7 +479,6 @@ static GHOSTTY: Keymap = Keymap {
 /// Resolve a focused app id to its built-in keymap, falling back to global.
 fn keymap_for(app_id: Option<&str>) -> &'static Keymap {
     match app_id {
-        Some("org.gnome.Nautilus.desktop") => &FILES,
         // Distro Firefox is "firefox.desktop"; modern Fedora and the Flatpak
         // ship it as "org.mozilla.firefox.desktop".
         Some("firefox.desktop") | Some("org.mozilla.firefox.desktop") => &FIREFOX,
@@ -970,7 +945,7 @@ mod tests {
     /// tab), with the trigger Shift consumed (never emitted).
     #[test]
     fn every_keymap_maps_cmd_shift_brackets_to_tab_nav() {
-        for keymap in [&GLOBAL, &FILES, &FIREFOX, &GHOSTTY] {
+        for keymap in [&GLOBAL, &FIREFOX, &GHOSTTY] {
             for (in_key, out_key) in [(KEY_LEFTBRACE, KEY_PAGEUP), (KEY_RIGHTBRACE, KEY_PAGEDOWN)] {
                 let mut e = KeymapEngine::new();
                 let out = drive(
@@ -1046,7 +1021,7 @@ mod tests {
     /// nothing, whether or not Super is held.
     #[test]
     fn capslock_does_nothing() {
-        for keymap in [&GLOBAL, &FILES, &FIREFOX, &GHOSTTY] {
+        for keymap in [&GLOBAL, &FIREFOX, &GHOSTTY] {
             let mut e = KeymapEngine::new();
             // Press, autorepeat, and release all produce no output.
             for value in [PRESS, 2, RELEASE] {
@@ -1575,13 +1550,11 @@ mod tests {
             "firefox.desktop"
         );
         assert_eq!(
-            keymap_for(Some("org.gnome.Nautilus.desktop")).id,
-            "org.gnome.Nautilus.desktop"
-        );
-        assert_eq!(
             keymap_for(Some("com.mitchellh.ghostty.desktop")).id,
             "com.mitchellh.ghostty.desktop"
         );
+        // Nautilus has no built-in keymap: the global fallback works well for it.
+        assert_eq!(keymap_for(Some("org.gnome.Nautilus.desktop")).id, "global");
         // GNOME Terminal has no built-in keymap: it falls back to global.
         assert_eq!(keymap_for(Some("org.gnome.Terminal.desktop")).id, "global");
         assert_eq!(keymap_for(Some("unknown.desktop")).id, "global");

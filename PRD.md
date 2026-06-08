@@ -84,8 +84,7 @@ Launching `mackey` from the application menu shows a wizard:
 ### Built-in keymaps (MVP)
 Keymaps are compiled into the daemon — there is no config file, no `~/.config/mackey/`, no in-app editor, no `/etc/mackey/`. Every install behaves identically. The bundled set covers:
 
-- **Global fallback** — applies when no app-specific keymap matches. Wires the common Super+`<letter>` shortcuts (C, V, X, A, Z, S, F, N, O, W, Q, T) to their Ctrl equivalents.
-- **Files** (`org.gnome.Nautilus.desktop`)
+- **Global fallback** — applies when no app-specific keymap matches. Wires the common Super+`<letter>` shortcuts (C, V, X, A, Z, S, F, N, O, W, Q, T) to their Ctrl equivalents, plus Super+Left/Right -> Alt+Left/Right (back/forward). Files (`org.gnome.Nautilus.desktop`) has no app-specific keymap — the global fallback covers it.
 - **Firefox** (`firefox.desktop`)
 - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults, derived from `src/config/Config.zig` (the macOS `super+` bindings) against `ghostty +list-keybinds --default` (Linux): Super+{C,V,A,F,N,T,W,Q} -> Ctrl+Shift+{same}; Super+{`,`/`=`/`-`/0/Enter} -> Ctrl+{same}; Super+{1..9} -> Alt+{same} (tab navigation); Super+Shift+{`,`/Enter/P} -> Ctrl+Shift+{same} (reload-config / zoom-split / command-palette); new split Super+D -> Ctrl+Shift+O and Super+Shift+D -> Ctrl+Shift+E; and split navigation Super+[ / ] -> Super+Ctrl+[ / ] (goto prev/next), Super+Alt+Arrow -> Ctrl+Alt+Arrow (goto directional), Super+Ctrl+Arrow -> Super+Ctrl+Shift+Arrow (resize). The engine matches input modifiers (Shift/Ctrl/Alt) on physical state, so modifier press-order is irrelevant. The macOS-only natural-text-editing binds (super+arrow/backspace) and alt+super+i (inspector) have no Linux default and are omitted.
 
