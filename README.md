@@ -55,6 +55,10 @@ The global fallback for any app without a dedicated keymap:
 | <kbd>⌘</kbd><kbd>T</kbd> | New tab |
 | <kbd>⌘</kbd><kbd>W</kbd> | Close |
 | <kbd>⌘</kbd><kbd>Q</kbd> | Quit |
+| <kbd>⌘</kbd><kbd>←</kbd> / <kbd>⌘</kbd><kbd>→</kbd> | Back / forward |
+| <kbd>⌘</kbd><kbd>⇧</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>⇧</kbd><kbd>]</kbd> | Previous / next tab |
+| <kbd>⌘</kbd><kbd>↑</kbd> | Activities overview |
+| <kbd>⌘</kbd><kbd>↓</kbd> | Close the overview |
 
 ### Firefox
 
@@ -85,18 +89,24 @@ All of the common shortcuts above, plus:
 | <kbd>⌘</kbd><kbd>⌥</kbd><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> | Go to split by direction |
 | <kbd>⌘</kbd><kbd>⌃</kbd><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd> | Resize split |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>↵</kbd> | Zoom / unzoom split |
+| <kbd>⌘</kbd><kbd>⇧</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>⇧</kbd><kbd>]</kbd> | Previous / next tab |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd> | Command palette |
 | <kbd>⌘</kbd><kbd>=</kbd> / <kbd>⌘</kbd><kbd>-</kbd> / <kbd>⌘</kbd><kbd>0</kbd> | Font bigger / smaller / reset |
 | <kbd>⌘</kbd><kbd>↵</kbd> | Toggle fullscreen |
 | <kbd>⌘</kbd><kbd>,</kbd> | Open config |
+| <kbd>⌘</kbd><kbd>⇧</kbd><kbd>,</kbd> | Reload config |
+| <kbd>⌘</kbd><kbd>↑</kbd> / <kbd>⌘</kbd><kbd>↓</kbd> | Activities overview / close it |
+| <kbd>⌘</kbd><kbd>←</kbd> / <kbd>⌘</kbd><kbd>→</kbd> | Nothing (a terminal has no history nav) |
 
-### Files (Nautilus)
+### Always active
 
-All of the common shortcuts above, plus:
+These work in every app and don't involve <kbd>⌘</kbd>:
 
 | Press | Does |
 | --- | --- |
-| <kbd>⌘</kbd><kbd>↑</kbd> | Go to parent folder |
+| <kbd>⌃</kbd><kbd>⌥</kbd><kbd>←</kbd> / <kbd>⌃</kbd><kbd>⌥</kbd><kbd>→</kbd> | Snap window left / right |
+| <kbd>⌃</kbd><kbd>⌥</kbd><kbd>↑</kbd> | Maximize window |
+| <kbd>⇪</kbd> Caps Lock | Nothing (disabled) |
 
 ## Adding new app/key mappings
 
