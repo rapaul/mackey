@@ -7,3 +7,10 @@
 
 KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="mackey", MODE="0660"
 SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", GROUP="mackey", MODE="0660"
+
+# Tag the daemon's virtual keyboard as an internal keyboard. The daemon grabs
+# (EVIOCGRAB) the real keyboard, so libinput never sees its keystrokes and would
+# never pair a touchpad with an internal keyboard — silently breaking
+# disable-while-typing (DWT). The synthetic keystrokes come out of this virtual
+# device instead, so it must be the one libinput treats as internal.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="mackey virtual keyboard", ENV{ID_INPUT_KEYBOARD_INTEGRATION}="internal"
