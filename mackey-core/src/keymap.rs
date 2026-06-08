@@ -25,9 +25,11 @@
 //! previous_tab/next_tab, distinct from goto_split's Super+[ / ]. Every keymap
 //! except Ghostty (a terminal, with no history nav) also carries back/forward:
 //! Super+Left / Right -> Alt+Left / Right; Ghostty instead **swallows** Super+Left
-//! / Right outright (they do nothing). And every keymap maps Super+Up to a
-//! synthetic Super tap, opening GNOME's Activities overview — the expose-style
-//! view of every window.
+//! / Right outright (they do nothing). And every keymap maps both Super+Up and
+//! Super+Down to a synthetic Super tap: Super+Up opens GNOME's Activities
+//! overview (the expose-style view of every window) and Super+Down closes it.
+//! GNOME's overview is a single stateless toggle, so closing is the same Super
+//! tap as opening — Super+Down is just the symmetric exit.
 //!
 //! A binding may therefore differ from the global "same key" rule in two ways: it
 //! can require extra **input modifiers** (Shift/Ctrl/Alt) as part of the trigger —
@@ -298,6 +300,16 @@ const SHOW_OVERVIEW: Binding = Binding {
     out_key: OVERVIEW,
 };
 
+// Cmd+Down closes the overview again (back to normal). GNOME's overview is a
+// single stateless toggle, so closing it is the very same Super tap that opens
+// it — Cmd+Down is symmetric with Cmd+Up and emits the OVERVIEW sentinel too.
+const HIDE_OVERVIEW: Binding = Binding {
+    in_key: KEY_DOWN,
+    in_mods: NO_MODS,
+    out_mods: &[],
+    out_key: OVERVIEW,
+};
+
 static GLOBAL: Keymap = Keymap {
     id: "global",
     bindings: &[
@@ -318,6 +330,7 @@ static GLOBAL: Keymap = Keymap {
         NAV_BACK,
         NAV_FORWARD,
         SHOW_OVERVIEW,
+        HIDE_OVERVIEW,
     ],
 };
 
@@ -341,6 +354,7 @@ static FIREFOX: Keymap = Keymap {
         NAV_BACK,
         NAV_FORWARD,
         SHOW_OVERVIEW,
+        HIDE_OVERVIEW,
         // Firefox-specific: reload (Cmd+R -> Ctrl+R), the private-window /
         // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P), and reopen the last
         // closed tab (Cmd+Shift+T -> Ctrl+Shift+T).
@@ -505,8 +519,9 @@ const GHOSTTY_ENTRIES: &[Binding] = &[
     // Cmd+[ / ] above by the Shift modifier.
     TAB_PREV,
     TAB_NEXT,
-    // Cmd+Up opens the Activities overview, as in every app.
+    // Cmd+Up opens the Activities overview and Cmd+Down closes it, as in every app.
     SHOW_OVERVIEW,
+    HIDE_OVERVIEW,
     // A terminal has no history nav, so Cmd+Left / Right are swallowed (they do
     // nothing) rather than passing the real Super through to GNOME's tiling.
     // (Cmd+Alt+Arrow and Cmd+Ctrl+Arrow above keep their split bindings.)
@@ -1839,23 +1854,27 @@ mod tests {
         }
     }
 
-    /// Cmd+Up opens GNOME's Activities overview in every app: a clean synthetic
-    /// Super tap, the key otherwise eaten, and no lone-Super tap when Cmd releases.
+    /// Cmd+Up opens GNOME's Activities overview and Cmd+Down closes it again, in
+    /// every app: each is a clean synthetic Super tap (GNOME's overview is a
+    /// single toggle), the key otherwise eaten, and no lone-Super tap when Cmd
+    /// releases.
     #[test]
-    fn cmd_up_opens_overview_in_every_app() {
+    fn cmd_up_and_down_toggle_overview_in_every_app() {
         for keymap in [&GLOBAL, &FIREFOX, &GHOSTTY] {
-            let mut e = KeymapEngine::new();
-            let out = drive(
-                &mut e,
-                keymap,
-                &[(LEFTMETA, 1), (KEY_UP, 1), (KEY_UP, 0), (LEFTMETA, 0)],
-            );
-            assert_eq!(
-                out,
-                vec![KeyEvent::new(LEFTMETA, 1), KeyEvent::new(LEFTMETA, 0)],
-                "keymap {}",
-                keymap.id
-            );
+            for arrow in [KEY_UP, KEY_DOWN] {
+                let mut e = KeymapEngine::new();
+                let out = drive(
+                    &mut e,
+                    keymap,
+                    &[(LEFTMETA, 1), (arrow, 1), (arrow, 0), (LEFTMETA, 0)],
+                );
+                assert_eq!(
+                    out,
+                    vec![KeyEvent::new(LEFTMETA, 1), KeyEvent::new(LEFTMETA, 0)],
+                    "keymap {} arrow {arrow}",
+                    keymap.id
+                );
+            }
         }
     }
 
