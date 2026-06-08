@@ -11,7 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use evdev::uinput::VirtualDevice;
-use evdev::{AttributeSet, Device, EventType, InputEvent, KeyCode};
+use evdev::{AttributeSet, BusType, Device, EventType, InputEvent, InputId, KeyCode};
 use inotify::{Inotify, WatchMask};
 use mackey_core::{is_keyboard, FocusState, Keymap, KeymapEngine, VIRTUAL_KEYBOARD_NAME};
 
@@ -33,6 +33,12 @@ struct Forwarder {
 
 /// Build the virtual output keyboard, advertising the full key range so any
 /// emitted key (including the synthetic Ctrl) is accepted by the kernel.
+///
+/// The device is declared on the PS/2 (`i8042`) bus so libinput's bundled
+/// `10-generic-keyboard.quirks` tags it `AttrKeyboardIntegration=internal`. The
+/// daemon grabs the real keyboard, so without this the synthetic keystrokes
+/// would come from a device libinput treats as external — silently breaking
+/// disable-while-typing (libinput pairs touchpads only with internal keyboards).
 fn build_virtual_keyboard() -> std::io::Result<VirtualDevice> {
     let mut keys = AttributeSet::<KeyCode>::new();
     for code in 1u16..0x300 {
@@ -40,6 +46,7 @@ fn build_virtual_keyboard() -> std::io::Result<VirtualDevice> {
     }
     VirtualDevice::builder()?
         .name(VIRTUAL_KEYBOARD_NAME)
+        .input_id(InputId::new(BusType::BUS_I8042, 0x1, 0x1, 0x1))
         .with_keys(&keys)?
         .build()
 }
