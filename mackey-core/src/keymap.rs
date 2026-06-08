@@ -24,7 +24,10 @@
 //! / ] -> Ctrl+PageUp / PageDown (prev/next tab) — for Ghostty this is
 //! previous_tab/next_tab, distinct from goto_split's Super+[ / ]. Every keymap
 //! except Ghostty (a terminal, with no history nav) also carries back/forward:
-//! Super+Left / Right -> Alt+Left / Right.
+//! Super+Left / Right -> Alt+Left / Right; Ghostty instead **swallows** Super+Left
+//! / Right outright (they do nothing). And every keymap maps Super+Up to a
+//! synthetic Super tap, opening GNOME's Activities overview — the expose-style
+//! view of every window.
 //!
 //! A binding may therefore differ from the global "same key" rule in two ways: it
 //! can require extra **input modifiers** (Shift/Ctrl/Alt) as part of the trigger —
@@ -37,9 +40,12 @@
 //! Super(+mods) + any *unmapped* key (the real Super, plus any held modifiers, is
 //! emitted so e.g. Super+L still reaches the desktop).
 //!
-//! One key is special across every keymap: Caps Lock is swallowed entirely
-//! (press, release, and autorepeat all emit nothing), so it does nothing in any
-//! app.
+//! Two behaviors are keymap-independent, applied outside the per-app table: Caps
+//! Lock is swallowed entirely (press, release, and autorepeat all emit nothing),
+//! so it does nothing in any app; and — with Super *not* held — Ctrl+Alt+Left /
+//! Right / Up are rewritten to Super+Left / Right / Up (GNOME snap-left /
+//! snap-right / maximize), the trigger Ctrl+Alt released first so GNOME sees a
+//! clean Super+arrow and restored when the arrow releases.
 //!
 //! The engine is a pure state machine over `(code, value)` key events plus an
 //! active [`Keymap`], so it can be exhaustively unit-tested without a kernel.
@@ -221,6 +227,23 @@ const fn key(in_key: u16, out_mods: &'static [u16]) -> Binding {
     }
 }
 
+/// Sentinel `out_key` values that don't denote a real key. A binding carrying one
+/// produces no ordinary key event: `SWALLOW` emits nothing at all (the input is
+/// eaten); `OVERVIEW` emits a synthetic Super tap (GNOME's overlay key).
+const SWALLOW: u16 = 0; // KEY_RESERVED — never a real key code.
+const OVERVIEW: u16 = u16::MAX;
+
+/// A binding that eats its key: while Super is held, `in_key` with no extra input
+/// modifier produces no output at all.
+const fn swallow(in_key: u16) -> Binding {
+    Binding {
+        in_key,
+        in_mods: NO_MODS,
+        out_mods: &[],
+        out_key: SWALLOW,
+    }
+}
+
 /// A built-in keymap: while Super is held, each listed binding is emitted with
 /// its modifier set instead of Super. Keys absent from `bindings` pass the real
 /// Super through.
@@ -264,6 +287,17 @@ const TAB_NEXT: Binding = Binding {
 const NAV_BACK: Binding = key(KEY_LEFT, ALT);
 const NAV_FORWARD: Binding = key(KEY_RIGHT, ALT);
 
+// Overview: Cmd+Up opens GNOME's Activities overview (the expose-style view of
+// every window), in every app. It emits a synthetic Super tap — the overlay key
+// GNOME's overview triggers on — rather than a held modifier, so the output key
+// is the OVERVIEW sentinel rather than a normal remap.
+const SHOW_OVERVIEW: Binding = Binding {
+    in_key: KEY_UP,
+    in_mods: NO_MODS,
+    out_mods: &[],
+    out_key: OVERVIEW,
+};
+
 static GLOBAL: Keymap = Keymap {
     id: "global",
     bindings: &[
@@ -283,6 +317,7 @@ static GLOBAL: Keymap = Keymap {
         TAB_NEXT,
         NAV_BACK,
         NAV_FORWARD,
+        SHOW_OVERVIEW,
     ],
 };
 
@@ -305,6 +340,7 @@ static FIREFOX: Keymap = Keymap {
         TAB_NEXT,
         NAV_BACK,
         NAV_FORWARD,
+        SHOW_OVERVIEW,
         // Firefox-specific: reload (Cmd+R -> Ctrl+R), the private-window /
         // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P), and reopen the last
         // closed tab (Cmd+Shift+T -> Ctrl+Shift+T).
@@ -469,6 +505,13 @@ const GHOSTTY_ENTRIES: &[Binding] = &[
     // Cmd+[ / ] above by the Shift modifier.
     TAB_PREV,
     TAB_NEXT,
+    // Cmd+Up opens the Activities overview, as in every app.
+    SHOW_OVERVIEW,
+    // A terminal has no history nav, so Cmd+Left / Right are swallowed (they do
+    // nothing) rather than passing the real Super through to GNOME's tiling.
+    // (Cmd+Alt+Arrow and Cmd+Ctrl+Arrow above keep their split bindings.)
+    swallow(KEY_LEFT),
+    swallow(KEY_RIGHT),
 ];
 
 static GHOSTTY: Keymap = Keymap {
@@ -489,6 +532,18 @@ fn keymap_for(app_id: Option<&str>) -> &'static Keymap {
 
 fn is_meta(code: u16) -> bool {
     code == LEFTMETA || code == RIGHTMETA
+}
+
+/// Keymap-independent window management (Super *not* held): Ctrl+Alt+Left / Right
+/// / Up map to Super+Left / Right / Up (GNOME snap-left / snap-right / maximize).
+/// Returns the arrow to emit under Super, or `None` if `code`+`mods` isn't one of
+/// these. Exactly Ctrl+Alt (no Shift) so it can't shadow richer combos.
+fn wm_target(code: u16, mods: InputMods) -> Option<u16> {
+    if mods.ctrl && mods.alt && !mods.shift && matches!(code, KEY_LEFT | KEY_RIGHT | KEY_UP) {
+        Some(code)
+    } else {
+        None
+    }
 }
 
 /// A single key event: an EV_KEY `code` with a `value` (0=release, 1=press,
@@ -530,6 +585,15 @@ pub struct KeymapEngine {
     held_mods: Vec<u16>,
     /// We passed the real Super through for an unmapped combo and owe its release.
     emitted_super: bool,
+    /// Whether any key was acted on during the current Super-hold (mapped,
+    /// swallowed, overview, or unmapped). Suppresses the deferred lone-Super tap
+    /// on release for holds that did nothing visible (a swallow or an overview
+    /// tap), so they don't also fire the Activities overview.
+    key_fired: bool,
+    /// An active Ctrl+Alt+arrow window shortcut: the arrow being emitted under
+    /// Super, plus the trigger modifiers we released (to restore on its release).
+    /// Independent of the Super-hold machinery above.
+    wm_active: Option<(u16, InputMods)>,
     /// Remapped keys currently held, as `(in_key, out_key)`, so a key's release
     /// and autorepeat emit the same output key the press chose — even if a
     /// modifier was released first (which can change what a fresh lookup picks).
@@ -546,6 +610,8 @@ impl Default for KeymapEngine {
             suppressed: InputMods::default(),
             held_mods: Vec::new(),
             emitted_super: false,
+            key_fired: false,
+            wm_active: None,
             active: Vec::new(),
         }
     }
@@ -570,16 +636,32 @@ impl KeymapEngine {
         }
         if value == PRESS {
             if !self.super_down {
+                // Ctrl+Alt+arrow -> Super+arrow (window management), keymap-
+                // independent; everything else passes through untouched.
+                if let Some(arrow) = wm_target(code, self.phys) {
+                    return self.emit_wm(arrow);
+                }
                 return vec![KeyEvent::new(code, value)];
             }
+            self.key_fired = true;
             return match keymap.binding_for(code, self.phys) {
+                Some(b) if b.out_key == SWALLOW => self.emit_swallow(code),
+                Some(b) if b.out_key == OVERVIEW => self.emit_overview(code),
                 Some(b) => self.emit_mapped(code, b),
                 None => self.emit_unmapped(code),
             };
         }
+        // Release / autorepeat of a live Ctrl+Alt+arrow window shortcut.
+        if let Some((arrow, released)) = self.wm_active {
+            if code == arrow {
+                return self.wm_release_or_repeat(arrow, released, value);
+            }
+        }
         // Release / autorepeat: if this key was emitted as a remap, replay the
-        // same output key; otherwise (passthrough or no-Super key) pass it on.
+        // same output key (or nothing, for a swallowed key); otherwise
+        // (passthrough or no-Super key) pass it on.
         match self.active_out(code, value == RELEASE) {
+            Some(SWALLOW) => Vec::new(),
             Some(out_key) => vec![KeyEvent::new(out_key, value)],
             None => vec![KeyEvent::new(code, value)],
         }
@@ -655,6 +737,81 @@ impl KeymapEngine {
         out
     }
 
+    /// Release any synthetic modifiers held from an earlier mapped key in this
+    /// Super-hold, so they don't leak past a key that emits no output of its own.
+    fn drop_held_mods(&mut self) -> Vec<KeyEvent> {
+        let mut out = Vec::new();
+        for &m in self.held_mods.iter().rev() {
+            out.push(KeyEvent::new(m, RELEASE));
+        }
+        self.held_mods.clear();
+        out
+    }
+
+    /// Super+swallowed-key -> nothing. The key is eaten; record it so its release
+    /// and autorepeat emit nothing too.
+    fn emit_swallow(&mut self, code: u16) -> Vec<KeyEvent> {
+        let out = self.drop_held_mods();
+        self.active.retain(|&(in_c, _)| in_c != code);
+        self.active.push((code, SWALLOW));
+        out
+    }
+
+    /// Super+Up -> a synthetic Super tap, toggling GNOME's Activities overview.
+    /// The key is otherwise eaten (recorded as a swallow), and `key_fired`
+    /// suppresses the deferred lone-Super tap when the physical Super releases.
+    fn emit_overview(&mut self, code: u16) -> Vec<KeyEvent> {
+        let mut out = self.drop_held_mods();
+        out.push(KeyEvent::new(LEFTMETA, PRESS));
+        out.push(KeyEvent::new(LEFTMETA, RELEASE));
+        self.active.retain(|&(in_c, _)| in_c != code);
+        self.active.push((code, SWALLOW));
+        out
+    }
+
+    /// Ctrl+Alt+arrow -> Super+arrow (Super not held). Release the physical
+    /// Ctrl+Alt so GNOME sees a clean Super+arrow, then press Super+arrow; record
+    /// the released modifiers to restore on the arrow's release.
+    fn emit_wm(&mut self, arrow: u16) -> Vec<KeyEvent> {
+        let mut out = Vec::new();
+        let mut released = InputMods::default();
+        for m in [Mod::Ctrl, Mod::Alt] {
+            if self.phys.get(m) {
+                out.push(KeyEvent::new(self.phys_code[m.idx()], RELEASE));
+                released.set(m, true);
+            }
+        }
+        out.push(KeyEvent::new(LEFTMETA, PRESS));
+        out.push(KeyEvent::new(arrow, PRESS));
+        self.wm_active = Some((arrow, released));
+        out
+    }
+
+    /// Release or autorepeat of a live Ctrl+Alt+arrow shortcut. Autorepeat just
+    /// repeats the arrow (Super stays held); release ends it — release the arrow
+    /// and Super, then re-press any trigger modifier still physically held.
+    fn wm_release_or_repeat(
+        &mut self,
+        arrow: u16,
+        released: InputMods,
+        value: i32,
+    ) -> Vec<KeyEvent> {
+        if value != RELEASE {
+            return vec![KeyEvent::new(arrow, value)];
+        }
+        let mut out = vec![
+            KeyEvent::new(arrow, RELEASE),
+            KeyEvent::new(LEFTMETA, RELEASE),
+        ];
+        for m in [Mod::Ctrl, Mod::Alt] {
+            if released.get(m) && self.phys.get(m) {
+                out.push(KeyEvent::new(self.phys_code[m.idx()], PRESS));
+            }
+        }
+        self.wm_active = None;
+        out
+    }
+
     /// Shift/Ctrl/Alt handling. We always track the physical state. While Super is
     /// held, a fresh press is deferred (suppressed) so it shapes the binding
     /// lookup without leaking — unless an unmapped combo already forced the real
@@ -701,6 +858,7 @@ impl KeymapEngine {
                 self.meta_code = code;
                 self.held_mods.clear();
                 self.emitted_super = false;
+                self.key_fired = false;
                 Vec::new()
             }
             RELEASE => {
@@ -712,10 +870,11 @@ impl KeymapEngine {
                 self.held_mods.clear();
                 if self.emitted_super {
                     out.push(KeyEvent::new(self.meta_code, RELEASE));
-                } else if !had_mods && !self.phys.any() {
+                } else if !had_mods && !self.phys.any() && !self.key_fired {
                     // Nothing followed: emit the deferred tap so Super-alone works.
                     // (Suppressed when another modifier is held — Super+mod alone is
-                    // a no-op, and that modifier's release is swallowed separately.)
+                    // a no-op, and that modifier's release is swallowed separately —
+                    // or when a swallowed/overview key already acted on this hold.)
                     out.push(KeyEvent::new(self.meta_code, PRESS));
                     out.push(KeyEvent::new(self.meta_code, RELEASE));
                 }
@@ -1465,7 +1624,12 @@ mod tests {
             GHOSTTY.binding_for(KEY_UP, CTRL_IN).map(|b| b.out_mods),
             Some(SUPER_CTRL_SHIFT)
         );
-        assert!(GHOSTTY.binding_for(KEY_UP, NO_MODS).is_none());
+        // Cmd+Up (no extra input modifier) opens the overview, in Ghostty as
+        // everywhere — so it is no longer unmapped.
+        assert_eq!(
+            GHOSTTY.binding_for(KEY_UP, NO_MODS).map(|b| b.out_key),
+            Some(OVERVIEW)
+        );
     }
 
     /// Firefox back/forward: Cmd+Left -> Alt+Left, Cmd+Right -> Alt+Right. The
@@ -1657,5 +1821,116 @@ mod tests {
         // Drop the heartbeat: once the gap exceeds the window, it reverts.
         assert_eq!(s.active_keymap(t + STALE_MS).id, "firefox.desktop");
         assert_eq!(s.active_keymap(t + STALE_MS + 1).id, "global");
+    }
+
+    /// Ghostty swallows Cmd+Left / Right entirely: the press, the release, and
+    /// the trailing Cmd release all emit nothing — in particular no stray Super
+    /// tap (which would otherwise open the overview).
+    #[test]
+    fn ghostty_cmd_left_right_do_nothing() {
+        for arrow in [KEY_LEFT, KEY_RIGHT] {
+            let mut e = KeymapEngine::new();
+            let out = drive(
+                &mut e,
+                &GHOSTTY,
+                &[(LEFTMETA, 1), (arrow, 1), (arrow, 0), (LEFTMETA, 0)],
+            );
+            assert!(out.is_empty(), "arrow {arrow}: {out:?}");
+        }
+    }
+
+    /// Cmd+Up opens GNOME's Activities overview in every app: a clean synthetic
+    /// Super tap, the key otherwise eaten, and no lone-Super tap when Cmd releases.
+    #[test]
+    fn cmd_up_opens_overview_in_every_app() {
+        for keymap in [&GLOBAL, &FIREFOX, &GHOSTTY] {
+            let mut e = KeymapEngine::new();
+            let out = drive(
+                &mut e,
+                keymap,
+                &[(LEFTMETA, 1), (KEY_UP, 1), (KEY_UP, 0), (LEFTMETA, 0)],
+            );
+            assert_eq!(
+                out,
+                vec![KeyEvent::new(LEFTMETA, 1), KeyEvent::new(LEFTMETA, 0)],
+                "keymap {}",
+                keymap.id
+            );
+        }
+    }
+
+    /// Ctrl+Alt+Left / Right / Up are keymap-independent window management (Super
+    /// not held): the physical Ctrl+Alt is released so GNOME sees a clean
+    /// Super+arrow (snap-left / snap-right / maximize).
+    #[test]
+    fn ctrl_alt_arrows_emit_super_arrow() {
+        for arrow in [KEY_LEFT, KEY_RIGHT, KEY_UP] {
+            let mut e = KeymapEngine::new();
+            let out = drive(&mut e, &GLOBAL, &[(LEFTCTRL, 1), (LEFTALT, 1), (arrow, 1)]);
+            assert_eq!(
+                out,
+                vec![
+                    KeyEvent::new(LEFTCTRL, 1),
+                    KeyEvent::new(LEFTALT, 1),
+                    // Trigger Ctrl+Alt released so GNOME sees a clean Super+arrow.
+                    KeyEvent::new(LEFTCTRL, 0),
+                    KeyEvent::new(LEFTALT, 0),
+                    KeyEvent::new(LEFTMETA, 1),
+                    KeyEvent::new(arrow, 1),
+                ],
+                "arrow {arrow}"
+            );
+        }
+    }
+
+    /// Releasing the arrow ends the shortcut: the arrow and Super release, then
+    /// the trigger Ctrl+Alt (still physically held) is restored.
+    #[test]
+    fn ctrl_alt_arrow_release_restores_modifiers() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GLOBAL,
+            &[
+                (LEFTCTRL, 1),
+                (LEFTALT, 1),
+                (KEY_LEFT, 1),
+                (KEY_LEFT, 0),
+                (LEFTALT, 0),
+                (LEFTCTRL, 0),
+            ],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTALT, 1),
+                KeyEvent::new(LEFTCTRL, 0),
+                KeyEvent::new(LEFTALT, 0),
+                KeyEvent::new(LEFTMETA, 1),
+                KeyEvent::new(KEY_LEFT, 1),
+                KeyEvent::new(KEY_LEFT, 0),
+                KeyEvent::new(LEFTMETA, 0),
+                // Ctrl+Alt restored on arrow release, then released by the user.
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(LEFTALT, 1),
+                KeyEvent::new(LEFTALT, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Only Left / Right / Up are window shortcuts; Ctrl+Alt+Down is left alone
+    /// (no Super injected), and the window remap needs both Ctrl and Alt.
+    #[test]
+    fn ctrl_alt_down_is_not_a_window_shortcut() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &GLOBAL,
+            &[(LEFTCTRL, 1), (LEFTALT, 1), (KEY_DOWN, 1)],
+        );
+        assert_eq!(out.last(), Some(&KeyEvent::new(KEY_DOWN, 1)));
+        assert!(!out.iter().any(|ev| ev.code == LEFTMETA));
     }
 }
