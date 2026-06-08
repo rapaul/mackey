@@ -7,7 +7,8 @@
 //! - **Global fallback** — Super+{C,V,X,A,Z,S,F,N,O,W,Q,T} -> Ctrl+{same}.
 //! - **Files** (`org.gnome.Nautilus.desktop`) — global, plus Super+Up -> Alt+Up.
 //! - **Firefox** (`firefox.desktop` / `org.mozilla.firefox.desktop`) — global,
-//!   plus Super+R -> Ctrl+R (reload),
+//!   plus Super+Left/Right -> Alt+Left/Right (back/forward),
+//!   Super+R -> Ctrl+R (reload),
 //!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Shift+T ->
 //!   Ctrl+Shift+T (reopen closed tab).
 //! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults (its
@@ -313,6 +314,11 @@ static FIREFOX: Keymap = Keymap {
         key(KEY_T, CTRL),
         TAB_PREV,
         TAB_NEXT,
+        // Back / forward: Cmd+Left -> Alt+Left, Cmd+Right -> Alt+Right. Without
+        // these, Super+Arrow would pass through to GNOME's window snapping instead
+        // of navigating history.
+        key(KEY_LEFT, ALT),
+        key(KEY_RIGHT, ALT),
         // Firefox-specific: reload (Cmd+R -> Ctrl+R), the private-window /
         // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P), and reopen the last
         // closed tab (Cmd+Shift+T -> Ctrl+Shift+T).
@@ -1396,11 +1402,11 @@ mod tests {
         assert!(GHOSTTY.binding_for(KEY_UP, NO_MODS).is_none());
     }
 
-    /// Firefox no longer maps Cmd+Left/Right (GNOME's window manager owns those
-    /// for moving windows between workspaces): they're unmapped, so the real
-    /// Super passes through to the desktop.
+    /// Firefox back/forward: Cmd+Left -> Alt+Left, Cmd+Right -> Alt+Right. The
+    /// Super is rewritten to Alt so navigation fires instead of GNOME's window
+    /// snapping.
     #[test]
-    fn firefox_arrows_are_unmapped_passthrough() {
+    fn firefox_arrows_are_back_forward() {
         for arrow in [KEY_LEFT, KEY_RIGHT] {
             let mut e = KeymapEngine::new();
             let out = drive(
@@ -1411,10 +1417,10 @@ mod tests {
             assert_eq!(
                 out,
                 vec![
-                    KeyEvent::new(LEFTMETA, 1),
+                    KeyEvent::new(LEFTALT, 1),
                     KeyEvent::new(arrow, 1),
                     KeyEvent::new(arrow, 0),
-                    KeyEvent::new(LEFTMETA, 0),
+                    KeyEvent::new(LEFTALT, 0),
                 ],
                 "arrow {arrow}"
             );
