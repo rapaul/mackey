@@ -31,14 +31,18 @@ struct Forwarder {
     start: Instant,
 }
 
+/// Identity for the virtual output keyboard. Declared on the PS/2 (`i8042`) bus
+/// so libinput's bundled `10-generic-keyboard.quirks` tags it
+/// `AttrKeyboardIntegration=internal`. The daemon grabs the real keyboard, so
+/// without this the synthetic keystrokes would come from a device libinput
+/// treats as external — silently breaking disable-while-typing (libinput pairs
+/// touchpads only with internal keyboards).
+fn virtual_keyboard_id() -> InputId {
+    InputId::new(BusType::BUS_I8042, 0x1, 0x1, 0x1)
+}
+
 /// Build the virtual output keyboard, advertising the full key range so any
 /// emitted key (including the synthetic Ctrl) is accepted by the kernel.
-///
-/// The device is declared on the PS/2 (`i8042`) bus so libinput's bundled
-/// `10-generic-keyboard.quirks` tags it `AttrKeyboardIntegration=internal`. The
-/// daemon grabs the real keyboard, so without this the synthetic keystrokes
-/// would come from a device libinput treats as external — silently breaking
-/// disable-while-typing (libinput pairs touchpads only with internal keyboards).
 fn build_virtual_keyboard() -> std::io::Result<VirtualDevice> {
     let mut keys = AttributeSet::<KeyCode>::new();
     for code in 1u16..0x300 {
@@ -46,7 +50,7 @@ fn build_virtual_keyboard() -> std::io::Result<VirtualDevice> {
     }
     VirtualDevice::builder()?
         .name(VIRTUAL_KEYBOARD_NAME)
-        .input_id(InputId::new(BusType::BUS_I8042, 0x1, 0x1, 0x1))
+        .input_id(virtual_keyboard_id())
         .with_keys(&keys)?
         .build()
 }
@@ -237,4 +241,18 @@ fn main() {
 
     eprintln!("mackeyd shutting down");
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The virtual keyboard must advertise the i8042 (PS/2) bus: that is what
+    /// makes libinput tag it an internal keyboard (via its bundled
+    /// `10-generic-keyboard.quirks`) so disable-while-typing keeps working while
+    /// the daemon holds the real keyboard grabbed.
+    #[test]
+    fn virtual_keyboard_is_on_the_i8042_bus() {
+        assert_eq!(virtual_keyboard_id().bus_type(), BusType::BUS_I8042);
+    }
 }
