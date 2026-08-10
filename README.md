@@ -67,6 +67,7 @@ All of the common shortcuts above, plus:
 | Press | Does |
 | --- | --- |
 | <kbd>⌘</kbd><kbd>R</kbd> | Reload |
+| <kbd>⌘</kbd><kbd>L</kbd> | Focus the address bar |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd> | Private window |
 | <kbd>⌘</kbd><kbd>⇧</kbd><kbd>T</kbd> | Reopen closed tab |
 

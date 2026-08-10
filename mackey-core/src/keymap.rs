@@ -8,7 +8,7 @@
 //!   Super+Left/Right -> Alt+Left/Right (back/forward). Files (Nautilus) uses this
 //!   fallback as-is.
 //! - **Firefox** (`firefox.desktop` / `org.mozilla.firefox.desktop`) — global,
-//!   plus Super+R -> Ctrl+R (reload),
+//!   plus Super+R -> Ctrl+R (reload), Super+L -> Ctrl+L (address bar),
 //!   Super+Shift+P -> Ctrl+Shift+P (private window), and Super+Shift+T ->
 //!   Ctrl+Shift+T (reopen closed tab).
 //! - **Ghostty** (`com.mitchellh.ghostty.desktop`) — Ghostty's own defaults (its
@@ -40,7 +40,7 @@
 //! not in the active table passes through untouched: a key with Super *not* held,
 //! a lone Super tap (emitted on release so GNOME's Activities still opens), and
 //! Super(+mods) + any *unmapped* key (the real Super, plus any held modifiers, is
-//! emitted so e.g. Super+L still reaches the desktop).
+//! emitted so e.g. Super+K still reaches the desktop).
 //!
 //! Two behaviors are keymap-independent, applied outside the per-app table: Caps
 //! Lock is swallowed entirely (press, release, and autorepeat all emit nothing),
@@ -80,6 +80,7 @@ const KEY_Q: u16 = KeyCode::KEY_Q.code();
 const KEY_T: u16 = KeyCode::KEY_T.code();
 const KEY_P: u16 = KeyCode::KEY_P.code();
 const KEY_R: u16 = KeyCode::KEY_R.code();
+const KEY_L: u16 = KeyCode::KEY_L.code();
 const KEY_LEFT: u16 = KeyCode::KEY_LEFT.code();
 const KEY_RIGHT: u16 = KeyCode::KEY_RIGHT.code();
 const KEY_UP: u16 = KeyCode::KEY_UP.code();
@@ -355,10 +356,13 @@ static FIREFOX: Keymap = Keymap {
         NAV_FORWARD,
         SHOW_OVERVIEW,
         HIDE_OVERVIEW,
-        // Firefox-specific: reload (Cmd+R -> Ctrl+R), the private-window /
-        // command shortcut (Cmd+Shift+P -> Ctrl+Shift+P), and reopen the last
-        // closed tab (Cmd+Shift+T -> Ctrl+Shift+T).
+        // Firefox-specific: reload (Cmd+R -> Ctrl+R), focus the address bar
+        // (Cmd+L -> Ctrl+L — without this the real Super+L reaches GNOME, which
+        // locks the screen), the private-window / command shortcut (Cmd+Shift+P
+        // -> Ctrl+Shift+P), and reopen the last closed tab (Cmd+Shift+T ->
+        // Ctrl+Shift+T).
         key(KEY_R, CTRL),
+        key(KEY_L, CTRL),
         Binding {
             in_key: KEY_P,
             in_mods: SHIFT_IN,
@@ -959,7 +963,9 @@ mod tests {
             .collect()
     }
 
-    const KEY_L: u16 = KeyCode::KEY_L.code(); // not in any mapped set
+    // Mapped only in the Firefox table, so it stands in for an unmapped key in
+    // the global and Ghostty keymaps.
+    const KEY_K: u16 = KeyCode::KEY_K.code(); // not in any mapped set
 
     #[test]
     fn super_plus_mapped_key_becomes_ctrl() {
@@ -1051,14 +1057,14 @@ mod tests {
         let out = drive(
             &mut e,
             &GLOBAL,
-            &[(LEFTMETA, 1), (KEY_L, 1), (KEY_L, 0), (LEFTMETA, 0)],
+            &[(LEFTMETA, 1), (KEY_K, 1), (KEY_K, 0), (LEFTMETA, 0)],
         );
         assert_eq!(
             out,
             vec![
                 KeyEvent::new(LEFTMETA, 1),
-                KeyEvent::new(KEY_L, 1),
-                KeyEvent::new(KEY_L, 0),
+                KeyEvent::new(KEY_K, 1),
+                KeyEvent::new(KEY_K, 0),
                 KeyEvent::new(LEFTMETA, 0),
             ]
         );
@@ -1494,8 +1500,8 @@ mod tests {
             &[
                 (LEFTMETA, 1),
                 (LEFTSHIFT, 1),
-                (KEY_L, 1),
-                (KEY_L, 0),
+                (KEY_K, 1),
+                (KEY_K, 0),
                 (LEFTSHIFT, 0),
                 (LEFTMETA, 0),
             ],
@@ -1505,8 +1511,8 @@ mod tests {
             vec![
                 KeyEvent::new(LEFTMETA, 1),
                 KeyEvent::new(LEFTSHIFT, 1),
-                KeyEvent::new(KEY_L, 1),
-                KeyEvent::new(KEY_L, 0),
+                KeyEvent::new(KEY_K, 1),
+                KeyEvent::new(KEY_K, 0),
                 KeyEvent::new(LEFTSHIFT, 0),
                 KeyEvent::new(LEFTMETA, 0),
             ]
@@ -1687,6 +1693,27 @@ mod tests {
                 KeyEvent::new(LEFTCTRL, 1),
                 KeyEvent::new(KEY_R, 1),
                 KeyEvent::new(KEY_R, 0),
+                KeyEvent::new(LEFTCTRL, 0),
+            ]
+        );
+    }
+
+    /// Firefox address bar: Cmd+L -> Ctrl+L. No Super must survive, or GNOME
+    /// sees Super+L and locks the screen.
+    #[test]
+    fn firefox_l_gets_ctrl_l_not_super_l() {
+        let mut e = KeymapEngine::new();
+        let out = drive(
+            &mut e,
+            &FIREFOX,
+            &[(LEFTMETA, 1), (KEY_L, 1), (KEY_L, 0), (LEFTMETA, 0)],
+        );
+        assert_eq!(
+            out,
+            vec![
+                KeyEvent::new(LEFTCTRL, 1),
+                KeyEvent::new(KEY_L, 1),
+                KeyEvent::new(KEY_L, 0),
                 KeyEvent::new(LEFTCTRL, 0),
             ]
         );
